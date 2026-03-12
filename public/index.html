@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Institutional Portfolio Dashboard · Yahoo Finance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    body {
+      background: #eef2f6;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #1f2937;
+    }
+
+    .card-soft {
+      border: none;
+      border-radius: 24px;
+      box-shadow: 0 16px 35px -10px rgba(0, 25, 45, 0.12);
+      background: #ffffff;
+    }
+
+    .sticky-topbar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      backdrop-filter: blur(8px);
+      background: rgba(232, 232, 232, 0.96);
+      border-radius: 22px;
+      padding: 16px 18px 10px 18px;
+    }
+
+    .main-title {
+      color: #7a1f2b; /* burgundy red */
+      font-weight: 800;
+      letter-spacing: 0.2px;
+    }
+
+    .hero-icon {
+      background: linear-gradient(135deg, #7a1f2b 0%, #c2410c 30%, #eab308 62%, #2563eb 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: inline-block;
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.18));
+    }
+
+    .subtitle {
+      color: #4b5563;
+      font-size: 0.98rem;
+    }
+
+    .group-row td {
+      font-weight: 700;
+      background: linear-gradient(90deg, #f8fbff 0%, #ffffff 100%);
+      border-left: 6px solid var(--group-color);
+      font-size: 1.05rem;
+      padding: 0.9rem 1rem;
+    }
+
+    .table td,
+    .table th {
+      vertical-align: middle;
+    }
+
+    .spark-wrap {
+      width: 120px;
+      height: 42px;
+    }
+
+    .metric-up {
+      color: #198754;
+      font-weight: 700;
+    }
+
+    .metric-down {
+      color: #dc3545;
+      font-weight: 700;
+    }
+
+    .weight-input {
+      max-width: 92px;
+      text-align: right;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .badge-soft {
+      background: #f7fafc;
+      color: #223;
+      border-radius: 999px;
+      padding: 0.5rem 0.9rem;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .weight-warning {
+      display: none;
+      margin-top: 14px;
+      border-radius: 16px;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: #6b7280;
+      font-size: 0.95rem;
+      margin-top: 18px;
+      padding-bottom: 8px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+  </style>
+</head>
+<body>
+<div class="container-fluid px-4 py-4">
+  <div class="sticky-topbar pb-3 mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+      <div>
+        <h2 class="main-title mb-1">
+          <i class="bi bi-bar-chart-line-fill me-2 hero-icon"></i>
+          Institutional Portfolio Dashboard
+        </h2>
+        <div class="subtitle">
+          Expanded investment universe powered by Yahoo Finance · Sparklines and summary metrics
+        </div>
+      </div>
+
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select id="group-filter" class="form-select rounded-pill" style="width:220px;">
+          <option value="ALL">All groups</option>
+        </select>
+        <button id="refresh-btn" class="btn btn-primary rounded-pill px-4">
+          <i class="bi bi-arrow-repeat me-2"></i>Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card card-soft p-3">
+        <div class="text-muted small">Instruments loaded</div>
+        <div id="card-count" class="fs-2 fw-bold">0</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card card-soft p-3">
+        <div class="text-muted small">Positive today</div>
+        <div id="card-positive" class="fs-2 fw-bold">0</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card card-soft p-3">
+        <div class="text-muted small">Average 30D vol</div>
+        <div id="card-vol" class="fs-2 fw-bold">0%</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card card-soft p-3">
+        <div class="text-muted small">Portfolio weight total</div>
+        <div id="card-weight" class="fs-2 fw-bold text-success">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-soft p-3 mb-3">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <span class="badge-soft"><i class="bi bi-clock me-1"></i><span id="generated-at">ready</span></span>
+      <span class="badge-soft"><i class="bi bi-diagram-3 me-1"></i><span id="group-count">0 groups</span></span>
+      <span class="badge-soft"><i class="bi bi-database-check me-1"></i>Backend: FastAPI</span>
+      <span class="badge-soft"><i class="bi bi-graph-up-arrow me-1"></i>Source: Yahoo Finance</span>
+    </div>
+  </div>
+
+  <div class="card card-soft overflow-hidden">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th style="width:22%">Instrument</th>
+            <th style="width:10%">Price</th>
+            <th style="width:10%">Daily</th>
+            <th style="width:10%">1M</th>
+            <th style="width:10%">3M</th>
+            <th style="width:10%">YTD</th>
+            <th style="width:10%">30D Vol</th>
+            <th style="width:10%">Avg Vol</th>
+            <th style="width:10%">Sparkline</th>
+            <th style="width:8%">Target</th>
+            <th style="width:8%">Weight</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="weight-warning" class="alert alert-danger weight-warning" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    Total portfolio weight cannot exceed 100%.
+  </div>
+
+  <div class="footer-note">
+    By MK LabGEN@25 Istanbul
+  </div>
+</div>
+
+<script>
+const charts = {};
+let allRows = [];
+let allGroups = [];
+
+function fmtNumber(x, digits = 2) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  return Number(x).toFixed(digits);
+}
+
+function fmtPct(x) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  const v = Number(x);
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(2)}%`;
+}
+
+function fmtVol(x) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  const n = Number(x);
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return n.toFixed(0);
+}
+
+function pctClass(x) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "";
+  return x >= 0 ? "metric-up" : "metric-down";
+}
+
+function normalizeChartId(symbol) {
+  return `chart-${String(symbol).replace(/[^A-Za-z0-9_-]/g, "")}`;
+}
+
+function renderSparkline(symbol, data) {
+  const canvas = document.getElementById(normalizeChartId(symbol));
+  if (!canvas || !Array.isArray(data) || data.length < 2) return;
+
+  if (charts[symbol]) charts[symbol].destroy();
+
+  const ctx = canvas.getContext("2d");
+  const positive = data[data.length - 1] >= data[0];
+
+  charts[symbol] = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.map(() => ""),
+      datasets: [{
+        data,
+        borderColor: positive ? "#198754" : "#dc3545",
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: false,
+        tension: 0.25
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: false, tooltip: false },
+      scales: {
+        x: { display: false },
+        y: { display: false }
+      }
+    }
+  });
+}
+
+function updateCards(rows) {
+  document.getElementById("card-count").textContent = rows.length;
+
+  const positive = rows.filter(r => (r.daily_change_pct ?? -999) > 0).length;
+  document.getElementById("card-positive").textContent = positive;
+
+  const vols = rows
+    .map(r => r.vol_30d_pct)
+    .filter(v => v !== null && v !== undefined && !Number.isNaN(v));
+
+  const avgVol = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
+  document.getElementById("card-vol").textContent = `${avgVol.toFixed(2)}%`;
+}
+
+function getTotalWeight() {
+  return allRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
+}
+
+function updateWeightTotal() {
+  const total = getTotalWeight();
+  const target = document.getElementById("card-weight");
+  const warning = document.getElementById("weight-warning");
+
+  target.textContent = `${total.toFixed(1)}%`;
+
+  if (total > 100.0) {
+    target.className = "fs-2 fw-bold text-danger";
+    warning.style.display = "block";
+  } else if (Math.abs(total - 100.0) < 0.05) {
+    target.className = "fs-2 fw-bold text-success";
+    warning.style.display = "none";
+  } else {
+    target.className = "fs-2 fw-bold text-warning";
+    warning.style.display = "none";
+  }
+}
+
+function initializeWeights(rows) {
+  const targetSum = rows.reduce((sum, row) => sum + (parseFloat(row.target) || 0), 0);
+
+  if (targetSum <= 100) {
+    rows.forEach(row => {
+      row.current_weight = Number(row.target || 0);
+    });
+    return;
+  }
+
+  const scale = 100 / targetSum;
+  let running = 0;
+
+  rows.forEach((row, idx) => {
+    if (idx < rows.length - 1) {
+      const scaled = Number((Number(row.target || 0) * scale).toFixed(1));
+      row.current_weight = scaled;
+      running += scaled;
+    } else {
+      row.current_weight = Number((100 - running).toFixed(1));
+    }
+  });
+}
+
+function applySavedWeights(newRows, oldRows) {
+  const oldMap = new Map(oldRows.map(r => [r.symbol, r.current_weight]));
+  let hasSaved = false;
+
+  newRows.forEach(row => {
+    if (oldMap.has(row.symbol)) {
+      row.current_weight = Number(oldMap.get(row.symbol) || 0);
+      hasSaved = true;
+    }
+  });
+
+  if (!hasSaved) {
+    initializeWeights(newRows);
+  } else {
+    const total = newRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
+    if (total > 100) {
+      initializeWeights(newRows);
+    }
+  }
+}
+
+function enforceWeightCap(symbol, inputEl) {
+  const row = allRows.find(r => r.symbol === symbol);
+  if (!row) return;
+
+  let newValue = parseFloat(inputEl.value);
+  if (Number.isNaN(newValue) || newValue < 0) newValue = 0;
+
+  const oldValue = parseFloat(row.current_weight) || 0;
+  row.current_weight = newValue;
+
+  const total = getTotalWeight();
+
+  if (total > 100) {
+    const excess = total - 100;
+    row.current_weight = Math.max(0, newValue - excess);
+    inputEl.value = row.current_weight.toFixed(1);
+  } else {
+    inputEl.value = row.current_weight.toFixed(1);
+  }
+
+  updateWeightTotal();
+}
+
+function buildRows(filterValue = "ALL") {
+  const tbody = document.getElementById("table-body");
+  tbody.innerHTML = "";
+
+  const visibleRows = filterValue === "ALL"
+    ? allRows
+    : allRows.filter(x => x.group === filterValue);
+
+  const groupMap = {};
+  visibleRows.forEach(r => {
+    if (!groupMap[r.group]) groupMap[r.group] = [];
+    groupMap[r.group].push(r);
+  });
+
+  Object.entries(groupMap).forEach(([groupName, items]) => {
+    const trGroup = document.createElement("tr");
+    trGroup.className = "group-row";
+    trGroup.innerHTML = `<td colspan="11" style="--group-color:${items[0].group_color}">${groupName} <span class="text-muted ms-2">(${items.length})</span></td>`;
+    tbody.appendChild(trGroup);
+
+    items.forEach(row => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>
+          <div class="fw-semibold">${row.label}</div>
+          <div class="text-muted small">${row.symbol}</div>
+        </td>
+        <td class="fw-semibold">${fmtNumber(row.price, 2)}</td>
+        <td class="${pctClass(row.daily_change_pct)}">${fmtPct(row.daily_change_pct)}</td>
+        <td class="${pctClass(row.ret_1m_pct)}">${fmtPct(row.ret_1m_pct)}</td>
+        <td class="${pctClass(row.ret_3m_pct)}">${fmtPct(row.ret_3m_pct)}</td>
+        <td class="${pctClass(row.ytd_pct)}">${fmtPct(row.ytd_pct)}</td>
+        <td>${fmtPct(row.vol_30d_pct)}</td>
+        <td>${fmtVol(row.avg_volume_20d)}</td>
+        <td><div class="spark-wrap"><canvas id="${normalizeChartId(row.symbol)}"></canvas></div></td>
+        <td class="fw-semibold text-muted">${fmtNumber(row.target, 1)}%</td>
+        <td>
+          <input
+            type="number"
+            class="form-control weight-input"
+            value="${fmtNumber(row.current_weight, 1)}"
+            min="0"
+            max="100"
+            step="0.5"
+            data-symbol="${row.symbol}"
+          >
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  });
+
+  visibleRows.forEach(row => renderSparkline(row.symbol, row.sparkline));
+
+  document.querySelectorAll(".weight-input").forEach(input => {
+    input.addEventListener("input", function () {
+      const symbol = this.getAttribute("data-symbol");
+      enforceWeightCap(symbol, this);
+    });
+  });
+
+  updateCards(visibleRows);
+  updateWeightTotal();
+}
+
+async function loadUniverse() {
+  const res = await fetch("/api/universe");
+  const data = await res.json();
+  allGroups = data.groups.map(g => g.name);
+
+  const filter = document.getElementById("group-filter");
+  filter.innerHTML = `<option value="ALL">All groups</option>`;
+
+  allGroups.forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g;
+    opt.textContent = g;
+    filter.appendChild(opt);
+  });
+
+  document.getElementById("group-count").textContent = `${allGroups.length} groups`;
+}
+
+async function loadSnapshot(force = false) {
+  const url = force ? "/api/snapshot?force=true" : "/api/snapshot";
+  const res = await fetch(url);
+  const data = await res.json();
+
+  const previousRows = [...allRows];
+  allRows = data.rows || [];
+
+  applySavedWeights(allRows, previousRows);
+
+  document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
+
+  const filterValue = document.getElementById("group-filter").value || "ALL";
+  buildRows(filterValue);
+}
+
+document.getElementById("group-filter").addEventListener("change", (e) => {
+  buildRows(e.target.value);
+});
+
+document.getElementById("refresh-btn").addEventListener("click", async () => {
+  await loadSnapshot(true);
+});
+
+(async function init() {
+  await loadUniverse();
+  await loadSnapshot(false);
+})();
+</script>
+</body>
+</html>

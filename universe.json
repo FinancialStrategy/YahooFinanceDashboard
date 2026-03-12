@@ -1,0 +1,109 @@
+{
+  "groups": [
+    {
+      "name": "Digital Assets",
+      "color": "#f59e0b",
+      "items": [
+        { "symbol": "BTC-USD", "label": "Bitcoin", "target": 6.0 },
+        { "symbol": "ETH-USD", "label": "Ethereum", "target": 4.0 },
+        { "symbol": "SOL-USD", "label": "Solana", "target": 2.0 },
+        { "symbol": "XRP-USD", "label": "XRP", "target": 1.5 },
+        { "symbol": "BNB-USD", "label": "BNB", "target": 1.5 }
+      ]
+    },
+    {
+      "name": "US Core Equities",
+      "color": "#2563eb",
+      "items": [
+        { "symbol": "SPY", "label": "S&P 500", "target": 8.0 },
+        { "symbol": "QQQ", "label": "Nasdaq 100", "target": 7.0 },
+        { "symbol": "DIA", "label": "Dow Jones", "target": 4.0 },
+        { "symbol": "IWM", "label": "Russell 2000", "target": 4.0 },
+        { "symbol": "VTI", "label": "US Total Market", "target": 5.0 },
+        { "symbol": "SCHD", "label": "US Dividend Equity", "target": 3.0 }
+      ]
+    },
+    {
+      "name": "Global Equities",
+      "color": "#0f766e",
+      "items": [
+        { "symbol": "VEA", "label": "Developed Markets", "target": 4.0 },
+        { "symbol": "VWO", "label": "Emerging Markets", "target": 4.0 },
+        { "symbol": "EWJ", "label": "Japan", "target": 2.0 },
+        { "symbol": "EWG", "label": "Germany", "target": 2.0 },
+        { "symbol": "EWU", "label": "United Kingdom", "target": 1.5 },
+        { "symbol": "EWC", "label": "Canada", "target": 1.5 },
+        { "symbol": "EWZ", "label": "Brazil", "target": 1.0 },
+        { "symbol": "INDA", "label": "India", "target": 2.0 },
+        { "symbol": "FXI", "label": "China Large Cap", "target": 1.5 },
+        { "symbol": "KWEB", "label": "China Internet", "target": 1.0 },
+        { "symbol": "TUR", "label": "Turkey", "target": 1.0 }
+      ]
+    },
+    {
+      "name": "US Sectors & Factors",
+      "color": "#7c3aed",
+      "items": [
+        { "symbol": "XLK", "label": "Technology", "target": 2.0 },
+        { "symbol": "XLF", "label": "Financials", "target": 2.0 },
+        { "symbol": "XLE", "label": "Energy", "target": 1.5 },
+        { "symbol": "XLV", "label": "Healthcare", "target": 1.5 },
+        { "symbol": "XLI", "label": "Industrials", "target": 1.0 },
+        { "symbol": "XLB", "label": "Materials", "target": 1.0 },
+        { "symbol": "XLU", "label": "Utilities", "target": 1.0 },
+        { "symbol": "VNQ", "label": "US REITs", "target": 1.0 },
+        { "symbol": "MTUM", "label": "Momentum", "target": 1.0 },
+        { "symbol": "USMV", "label": "Min Vol", "target": 1.0 }
+      ]
+    },
+    {
+      "name": "Fixed Income",
+      "color": "#15803d",
+      "items": [
+        { "symbol": "TLT", "label": "US 20+Y Treasury", "target": 5.0 },
+        { "symbol": "IEF", "label": "US 7-10Y Treasury", "target": 4.0 },
+        { "symbol": "SHY", "label": "US 1-3Y Treasury", "target": 3.0 },
+        { "symbol": "TIP", "label": "US TIPS", "target": 2.0 },
+        { "symbol": "BND", "label": "US Aggregate Bond", "target": 3.0 },
+        { "symbol": "LQD", "label": "Investment Grade Credit", "target": 2.0 },
+        { "symbol": "HYG", "label": "High Yield Credit", "target": 1.5 },
+        { "symbol": "EMB", "label": "EM Sovereign Bonds", "target": 1.0 },
+        { "symbol": "BWX", "label": "Intl Treasury", "target": 1.0 },
+        { "symbol": "BIL", "label": "US T-Bills", "target": 2.0 }
+      ]
+    },
+    {
+      "name": "Commodities",
+      "color": "#b45309",
+      "items": [
+        { "symbol": "GLD", "label": "Gold", "target": 3.0 },
+        { "symbol": "SLV", "label": "Silver", "target": 1.5 },
+        { "symbol": "DBC", "label": "Broad Commodities", "target": 1.5 },
+        { "symbol": "PDBC", "label": "Optimum Yield Commodities", "target": 1.5 },
+        { "symbol": "DBA", "label": "Agriculture", "target": 1.0 },
+        { "symbol": "USO", "label": "Oil", "target": 1.0 },
+        { "symbol": "UNG", "label": "Natural Gas", "target": 0.5 },
+        { "symbol": "WEAT", "label": "Wheat", "target": 0.5 },
+        { "symbol": "CORN", "label": "Corn", "target": 0.5 },
+        { "symbol": "SOYB", "label": "Soybeans", "target": 0.5 },
+        { "symbol": "CPER", "label": "Copper", "target": 0.8 },
+        { "symbol": "DBB", "label": "Base Metals", "target": 0.7 },
+        { "symbol": "URA", "label": "Uranium", "target": 0.5 },
+        { "symbol": "LIT", "label": "Lithium & Battery Tech", "target": 0.5 }
+      ]
+    },
+    {
+      "name": "FX Proxies",
+      "color": "#374151",
+      "items": [
+        { "symbol": "UUP", "label": "US Dollar Index Proxy", "target": 1.0 },
+        { "symbol": "FXE", "label": "Euro", "target": 0.5 },
+        { "symbol": "FXY", "label": "Japanese Yen", "target": 0.5 },
+        { "symbol": "FXB", "label": "British Pound", "target": 0.5 },
+        { "symbol": "FXA", "label": "Australian Dollar", "target": 0.5 },
+        { "symbol": "FXC", "label": "Canadian Dollar", "target": 0.5 },
+        { "symbol": "CYB", "label": "Chinese Yuan", "target": 0.5 }
+      ]
+    }
+  ]
+}
