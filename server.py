@@ -194,4 +194,9 @@ def api_snapshot(force: bool = False):
             stale["stale"] = True
             stale["error"] = str(e)
             return JSONResponse(content=stale)
+
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
