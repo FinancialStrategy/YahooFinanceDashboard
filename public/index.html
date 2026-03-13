@@ -7,6 +7,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 
   <style>
     body {
@@ -33,7 +34,7 @@
     }
 
     .main-title {
-      color: #7a1f2b; /* burgundy red */
+      color: #7a1f2b;
       font-weight: 800;
       letter-spacing: 0.2px;
     }
@@ -60,8 +61,7 @@
       padding: 0.9rem 1rem;
     }
 
-    .table td,
-    .table th {
+    .table td, .table th {
       vertical-align: middle;
     }
 
@@ -110,6 +110,36 @@
       font-weight: 700;
       letter-spacing: 0.2px;
     }
+
+    .nav-pills .nav-link {
+      border-radius: 999px;
+      font-weight: 700;
+      color: #4b5563;
+      background: #ffffff;
+      border: 1px solid rgba(0,0,0,.06);
+    }
+
+    .nav-pills .nav-link.active {
+      background: #7a1f2b;
+      color: #ffffff;
+      border-color: #7a1f2b;
+    }
+
+    .plot-box {
+      min-height: 430px;
+    }
+
+    .mini-kpi {
+      font-size: 1.65rem;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+
+    .section-title {
+      color: #7a1f2b;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+    }
   </style>
 </head>
 <body>
@@ -122,7 +152,7 @@
           Institutional Portfolio Dashboard
         </h2>
         <div class="subtitle">
-          Expanded investment universe powered by Yahoo Finance · Sparklines and summary metrics
+          Expanded Investment Universe by MK FinTECH LabGEN@25 · Sparklines, summary metrics and Modern Portfolio Approach
         </div>
       </div>
 
@@ -137,68 +167,220 @@
     </div>
   </div>
 
-  <div class="row g-3 mb-4">
-    <div class="col-md-3">
-      <div class="card card-soft p-3">
-        <div class="text-muted small">Instruments loaded</div>
-        <div id="card-count" class="fs-2 fw-bold">0</div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card card-soft p-3">
-        <div class="text-muted small">Positive today</div>
-        <div id="card-positive" class="fs-2 fw-bold">0</div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card card-soft p-3">
-        <div class="text-muted small">Average 30D vol</div>
-        <div id="card-vol" class="fs-2 fw-bold">0%</div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card card-soft p-3">
-        <div class="text-muted small">Portfolio weight total</div>
-        <div id="card-weight" class="fs-2 fw-bold text-success">0%</div>
-      </div>
-    </div>
-  </div>
+  <ul class="nav nav-pills mb-4 gap-2" id="mainTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active px-4" id="overview-tab" data-bs-toggle="pill" data-bs-target="#overview-pane" type="button" role="tab">
+        <i class="bi bi-grid-1x2-fill me-2"></i>Overview
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link px-4" id="optimization-tab" data-bs-toggle="pill" data-bs-target="#optimization-pane" type="button" role="tab">
+        <i class="bi bi-bezier2 me-2"></i>Portfolio Optimization
+      </button>
+    </li>
+  </ul>
 
-  <div class="card card-soft p-3 mb-3">
-    <div class="d-flex flex-wrap gap-2 align-items-center">
-      <span class="badge-soft"><i class="bi bi-clock me-1"></i><span id="generated-at">ready</span></span>
-      <span class="badge-soft"><i class="bi bi-diagram-3 me-1"></i><span id="group-count">0 groups</span></span>
-      <span class="badge-soft"><i class="bi bi-database-check me-1"></i>Backend: FastAPI</span>
-      <span class="badge-soft"><i class="bi bi-graph-up-arrow me-1"></i>Source: Yahoo Finance</span>
-    </div>
-  </div>
+  <div class="tab-content">
+    <!-- OVERVIEW TAB -->
+    <div class="tab-pane fade show active" id="overview-pane" role="tabpanel">
+      <div class="row g-3 mb-4">
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Instruments loaded</div>
+            <div id="card-count" class="fs-2 fw-bold">0</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Positive today</div>
+            <div id="card-positive" class="fs-2 fw-bold">0</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Average 30D vol</div>
+            <div id="card-vol" class="fs-2 fw-bold">0%</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Portfolio weight total</div>
+            <div id="card-weight" class="fs-2 fw-bold text-success">0%</div>
+          </div>
+        </div>
+      </div>
 
-  <div class="card card-soft overflow-hidden">
-    <div class="table-responsive">
-      <table class="table table-hover align-middle mb-0">
-        <thead class="table-dark">
-          <tr>
-            <th style="width:22%">Instrument</th>
-            <th style="width:10%">Price</th>
-            <th style="width:10%">Daily</th>
-            <th style="width:10%">1M</th>
-            <th style="width:10%">3M</th>
-            <th style="width:10%">YTD</th>
-            <th style="width:10%">30D Vol</th>
-            <th style="width:10%">Avg Vol</th>
-            <th style="width:10%">Sparkline</th>
-            <th style="width:8%">Target</th>
-            <th style="width:8%">Weight</th>
-          </tr>
-        </thead>
-        <tbody id="table-body"></tbody>
-      </table>
-    </div>
-  </div>
+      <div class="card card-soft p-3 mb-3">
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <span class="badge-soft"><i class="bi bi-clock me-1"></i><span id="generated-at">ready</span></span>
+          <span class="badge-soft"><i class="bi bi-diagram-3 me-1"></i><span id="group-count">0 groups</span></span>
+          <span class="badge-soft"><i class="bi bi-database-check me-1"></i>Backend: FastAPI</span>
+          <span class="badge-soft"><i class="bi bi-graph-up-arrow me-1"></i>Source: Yahoo Finance</span>
+        </div>
+      </div>
 
-  <div id="weight-warning" class="alert alert-danger weight-warning" role="alert">
-    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-    Total portfolio weight cannot exceed 100%.
+      <div class="card card-soft overflow-hidden">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-dark">
+              <tr>
+                <th style="width:22%">Instrument</th>
+                <th style="width:10%">Price</th>
+                <th style="width:10%">Daily</th>
+                <th style="width:10%">1M</th>
+                <th style="width:10%">3M</th>
+                <th style="width:10%">YTD</th>
+                <th style="width:10%">30D Vol</th>
+                <th style="width:10%">Avg Vol</th>
+                <th style="width:10%">Sparkline</th>
+                <th style="width:8%">Target</th>
+                <th style="width:8%">Weight</th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="weight-warning" class="alert alert-danger weight-warning" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        Total portfolio weight cannot exceed 100%.
+      </div>
+    </div>
+
+    <!-- OPTIMIZATION TAB -->
+    <div class="tab-pane fade" id="optimization-pane" role="tabpanel">
+      <div class="row g-3 mb-4">
+        <div class="col-lg-3">
+          <div class="card card-soft p-3 h-100">
+            <div class="section-title">Optimization Controls</div>
+
+            <label class="form-label fw-semibold">Strategy</label>
+            <select id="opt-strategy" class="form-select mb-3">
+              <option value="max_sharpe">Max Sharpe</option>
+              <option value="min_volatility">Minimum Volatility</option>
+              <option value="max_quadratic_utility">Max Quadratic Utility</option>
+              <option value="efficient_risk">Efficient Risk</option>
+              <option value="efficient_return">Efficient Return</option>
+              <option value="hrp">Hierarchical Risk Parity (HRP)</option>
+              <option value="cla_max_sharpe">CLA Max Sharpe</option>
+              <option value="cla_min_volatility">CLA Min Volatility</option>
+            </select>
+
+            <label class="form-label fw-semibold">Target Volatility (%)</label>
+            <input id="target-volatility" type="number" class="form-control mb-3" value="15" step="0.5" min="1" max="80">
+
+            <label class="form-label fw-semibold">Target Return (%)</label>
+            <input id="target-return" type="number" class="form-control mb-3" value="12" step="0.5" min="1" max="80">
+
+            <div class="small text-muted mb-3">
+              Benchmark: <strong>S&amp;P 500 Index</strong> · Risk-free rate: <strong>3.5% USD</strong>
+            </div>
+
+            <button id="run-optimization-btn" class="btn btn-primary rounded-pill w-100">
+              <i class="bi bi-play-circle me-2"></i>Run Optimization
+            </button>
+          </div>
+        </div>
+
+        <div class="col-lg-9">
+          <div class="row g-3">
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Expected return</div>
+                <div id="opt-ret" class="mini-kpi">—</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Volatility</div>
+                <div id="opt-vol" class="mini-kpi">—</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Sharpe ratio</div>
+                <div id="opt-sharpe" class="mini-kpi">—</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Beta vs S&amp;P 500</div>
+                <div id="opt-beta" class="mini-kpi">—</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Alpha vs S&amp;P 500</div>
+                <div id="opt-alpha" class="mini-kpi">—</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Tracking error</div>
+                <div id="opt-te" class="mini-kpi">—</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Information ratio</div>
+                <div id="opt-ir" class="mini-kpi">—</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card card-soft p-3">
+                <div class="text-muted small">Selected strategy</div>
+                <div id="opt-strategy-label" class="mini-kpi" style="font-size:1.1rem;">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-lg-7">
+          <div class="card card-soft p-3">
+            <div class="section-title">Efficient Frontier</div>
+            <div id="frontier-chart" class="plot-box"></div>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="card card-soft p-3">
+            <div class="section-title">Top 10 Instruments · Return vs Volatility</div>
+            <div id="asset-scatter-chart" class="plot-box"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">Optimized Weights</div>
+            <div id="weights-bar-chart" class="plot-box"></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">Optimized Weight Table</div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Instrument</th>
+                    <th class="text-end">Weight</th>
+                  </tr>
+                </thead>
+                <tbody id="weights-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="optimization-status" class="mt-3 text-muted small"></div>
+    </div>
   </div>
 
   <div class="footer-note">
@@ -206,6 +388,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const charts = {};
 let allRows = [];
@@ -216,11 +399,18 @@ function fmtNumber(x, digits = 2) {
   return Number(x).toFixed(digits);
 }
 
-function fmtPct(x) {
+function fmtPct(x, digits = 2) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  const v = Number(x) * (Math.abs(x) < 3 ? 100 : 1);
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(digits)}%`;
+}
+
+function fmtPctRaw(x, digits = 2) {
   if (x === null || x === undefined || Number.isNaN(x)) return "—";
   const v = Number(x);
   const sign = v > 0 ? "+" : "";
-  return `${sign}${v.toFixed(2)}%`;
+  return `${sign}${v.toFixed(digits)}%`;
 }
 
 function fmtVol(x) {
@@ -364,9 +554,7 @@ function enforceWeightCap(symbol, inputEl) {
   let newValue = parseFloat(inputEl.value);
   if (Number.isNaN(newValue) || newValue < 0) newValue = 0;
 
-  const oldValue = parseFloat(row.current_weight) || 0;
   row.current_weight = newValue;
-
   const total = getTotalWeight();
 
   if (total > 100) {
@@ -408,11 +596,11 @@ function buildRows(filterValue = "ALL") {
           <div class="text-muted small">${row.symbol}</div>
         </td>
         <td class="fw-semibold">${fmtNumber(row.price, 2)}</td>
-        <td class="${pctClass(row.daily_change_pct)}">${fmtPct(row.daily_change_pct)}</td>
-        <td class="${pctClass(row.ret_1m_pct)}">${fmtPct(row.ret_1m_pct)}</td>
-        <td class="${pctClass(row.ret_3m_pct)}">${fmtPct(row.ret_3m_pct)}</td>
-        <td class="${pctClass(row.ytd_pct)}">${fmtPct(row.ytd_pct)}</td>
-        <td>${fmtPct(row.vol_30d_pct)}</td>
+        <td class="${pctClass(row.daily_change_pct)}">${fmtPctRaw(row.daily_change_pct)}</td>
+        <td class="${pctClass(row.ret_1m_pct)}">${fmtPctRaw(row.ret_1m_pct)}</td>
+        <td class="${pctClass(row.ret_3m_pct)}">${fmtPctRaw(row.ret_3m_pct)}</td>
+        <td class="${pctClass(row.ytd_pct)}">${fmtPctRaw(row.ytd_pct)}</td>
+        <td>${fmtPctRaw(row.vol_30d_pct)}</td>
         <td>${fmtVol(row.avg_volume_20d)}</td>
         <td><div class="spark-wrap"><canvas id="${normalizeChartId(row.symbol)}"></canvas></div></td>
         <td class="fw-semibold text-muted">${fmtNumber(row.target, 1)}%</td>
@@ -470,7 +658,6 @@ async function loadSnapshot(force = false) {
 
   const previousRows = [...allRows];
   allRows = data.rows || [];
-
   applySavedWeights(allRows, previousRows);
 
   document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
@@ -479,12 +666,189 @@ async function loadSnapshot(force = false) {
   buildRows(filterValue);
 }
 
+function strategyLabel(v) {
+  const map = {
+    max_sharpe: "Max Sharpe",
+    min_volatility: "Minimum Volatility",
+    max_quadratic_utility: "Max Quadratic Utility",
+    efficient_risk: "Efficient Risk",
+    efficient_return: "Efficient Return",
+    hrp: "HRP",
+    cla_max_sharpe: "CLA Max Sharpe",
+    cla_min_volatility: "CLA Min Volatility"
+  };
+  return map[v] || v;
+}
+
+function renderOptimizationMetrics(data) {
+  const m = data.metrics || {};
+  document.getElementById("opt-ret").textContent = fmtPct(m.expected_return);
+  document.getElementById("opt-vol").textContent = fmtPct(m.volatility);
+  document.getElementById("opt-sharpe").textContent = fmtNumber(m.sharpe, 2);
+  document.getElementById("opt-beta").textContent = fmtNumber(m.beta_vs_sp500, 2);
+  document.getElementById("opt-alpha").textContent = fmtPct(m.alpha_vs_sp500);
+  document.getElementById("opt-te").textContent = fmtPct(m.tracking_error_vs_sp500);
+  document.getElementById("opt-ir").textContent = fmtNumber(m.information_ratio_vs_sp500, 2);
+  document.getElementById("opt-strategy-label").textContent = strategyLabel(data.strategy);
+}
+
+function renderFrontierChart(data) {
+  const frontier = data.frontier || [];
+  const metrics = data.metrics || {};
+
+  const lineTrace = {
+    x: frontier.map(p => p.volatility * 100),
+    y: frontier.map(p => p.expected_return * 100),
+    mode: "lines",
+    type: "scatter",
+    name: "Efficient Frontier",
+    line: { width: 3 }
+  };
+
+  const portfolioPoint = {
+    x: [Number(metrics.volatility || 0) * 100],
+    y: [Number(metrics.expected_return || 0) * 100],
+    mode: "markers+text",
+    type: "scatter",
+    name: "Selected Portfolio",
+    text: ["Portfolio"],
+    textposition: "top center",
+    marker: { size: 14, symbol: "diamond" }
+  };
+
+  const layout = {
+    margin: { l: 50, r: 20, t: 20, b: 50 },
+    xaxis: { title: "Volatility (%)" },
+    yaxis: { title: "Expected Return (%)" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white",
+    hovermode: "closest"
+  };
+
+  Plotly.newPlot("frontier-chart", [lineTrace, portfolioPoint], layout, { responsive: true });
+}
+
+function renderAssetScatter(data) {
+  const assets = data.top_assets || [];
+
+  const trace = {
+    x: assets.map(a => a.volatility * 100),
+    y: assets.map(a => a.expected_return * 100),
+    text: assets.map(a => `${a.label} (${a.symbol})`),
+    customdata: assets.map(a => a.sharpe_proxy),
+    mode: "markers+text",
+    type: "scatter",
+    textposition: "top center",
+    marker: { size: 14, opacity: 0.85 },
+    hovertemplate:
+      "<b>%{text}</b><br>" +
+      "Volatility: %{x:.2f}%<br>" +
+      "Expected return: %{y:.2f}%<br>" +
+      "Sharpe proxy: %{customdata:.2f}<extra></extra>"
+  };
+
+  const layout = {
+    margin: { l: 50, r: 20, t: 20, b: 50 },
+    xaxis: { title: "Volatility (%)" },
+    yaxis: { title: "Expected Return (%)" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white",
+    hovermode: "closest"
+  };
+
+  Plotly.newPlot("asset-scatter-chart", [trace], layout, { responsive: true });
+}
+
+function renderWeightsBar(data) {
+  const weights = (data.weights || []).slice(0, 15).reverse();
+
+  const trace = {
+    x: weights.map(w => w.weight * 100),
+    y: weights.map(w => `${w.symbol}`),
+    type: "bar",
+    orientation: "h",
+    text: weights.map(w => `${(w.weight * 100).toFixed(2)}%`),
+    textposition: "outside"
+  };
+
+  const layout = {
+    margin: { l: 90, r: 25, t: 20, b: 40 },
+    xaxis: { title: "Weight (%)" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white"
+  };
+
+  Plotly.newPlot("weights-bar-chart", [trace], layout, { responsive: true });
+}
+
+function renderWeightsTable(data) {
+  const tbody = document.getElementById("weights-table-body");
+  tbody.innerHTML = "";
+
+  (data.weights || []).forEach(row => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="fw-semibold">${row.symbol}</td>
+      <td>${row.label}</td>
+      <td class="text-end fw-semibold">${(row.weight * 100).toFixed(2)}%</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function runOptimization() {
+  const strategy = document.getElementById("opt-strategy").value;
+  const targetVol = (parseFloat(document.getElementById("target-volatility").value) || 15) / 100;
+  const targetRet = (parseFloat(document.getElementById("target-return").value) || 12) / 100;
+
+  const btn = document.getElementById("run-optimization-btn");
+  const status = document.getElementById("optimization-status");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running...';
+  status.textContent = "Optimization is running on the current instrument universe...";
+
+  try {
+    const res = await fetch("/api/optimization", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbols: allRows.map(r => r.symbol),
+        strategy: strategy,
+        target_volatility: targetVol,
+        target_return: targetRet
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Optimization failed");
+    }
+
+    renderOptimizationMetrics(data);
+    renderFrontierChart(data);
+    renderAssetScatter(data);
+    renderWeightsBar(data);
+    renderWeightsTable(data);
+
+    status.textContent = `Optimization complete · Universe size: ${data.used_symbols.length} · Benchmark: ${data.benchmark_symbol} · Risk-free rate: ${(data.risk_free_rate * 100).toFixed(2)}%`;
+  } catch (err) {
+    status.textContent = `Optimization error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-circle me-2"></i>Run Optimization';
+  }
+}
+
 document.getElementById("group-filter").addEventListener("change", (e) => {
   buildRows(e.target.value);
 });
 
 document.getElementById("refresh-btn").addEventListener("click", async () => {
   await loadSnapshot(true);
+});
+
+document.getElementById("run-optimization-btn").addEventListener("click", async () => {
+  await runOptimization();
 });
 
 (async function init() {
