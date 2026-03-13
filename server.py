@@ -10,6 +10,7 @@ import pandas as pd
 import yfinance as yf
 from scipy.stats import norm
 from hmmlearn.hmm import GaussianHMM
+from sklearn.linear_model import LinearRegression
 
 from pypfopt import EfficientFrontier, expected_returns, risk_models
 from pypfopt.hierarchical_portfolio import HRPOpt
@@ -574,14 +575,7 @@ def compute_risk_metrics(portfolio_returns, confidence=0.95, horizon=1):
     }
 
 
-def compute_lstm_forecast(symbol, period="3y", lookback=30, forecast_horizon=20):
-    try:
-        import tensorflow as tf
-        from tensorflow.keras.models import Sequential
-        from tensorflow.keras.layers import LSTM, Dense
-    except Exception as e:
-        raise RuntimeError(f"TensorFlow is not installed or could not be imported: {e}")
-
+def compute_lightweight_forecast(symbol, period="3y", lookback=30, forecast_horizon=20):
     df = yf.download(
         tickers=symbol,
         period=period,
@@ -592,71 +586,64 @@ def compute_lstm_forecast(symbol, period="3y", lookback=30, forecast_horizon=20)
     )
 
     if df.empty:
-        raise RuntimeError("No data returned for LSTM forecast")
+        raise RuntimeError("No data returned for forecast")
 
     if isinstance(df.columns, pd.MultiIndex):
         close = df["Close"][symbol].dropna()
     else:
         close = df["Close"].dropna()
 
-    if len(close) < 200:
-        raise RuntimeError("Not enough observations for LSTM forecast")
+    if len(close) < max(lookback + 20, 80):
+        raise RuntimeError("Not enough observations for forecast")
 
-    values = close.values.astype("float32").reshape(-1, 1)
-    vmin = values.min()
-    vmax = values.max()
-    if vmax == vmin:
-        raise RuntimeError("Series is constant; LSTM forecast not meaningful")
+    values = close.values.astype(float)
+    returns = pd.Series(values).pct_change().dropna().values
 
-    scaled = (values - vmin) / (vmax - vmin)
+    if len(returns) < lookback + 10:
+        raise RuntimeError("Not enough return observations for forecast")
 
     X, y = [], []
-    for i in range(lookback, len(scaled)):
-        X.append(scaled[i - lookback:i, 0])
-        y.append(scaled[i, 0])
+    for i in range(lookback, len(returns)):
+        X.append(returns[i - lookback:i])
+        y.append(returns[i])
 
     X = np.array(X)
     y = np.array(y)
-    X = X.reshape((X.shape[0], X.shape[1], 1))
 
-    split = int(len(X) * 0.85)
-    X_train, y_train = X[:split], y[:split]
+    model = LinearRegression()
+    model.fit(X, y)
 
-    tf.random.set_seed(42)
-    model = Sequential([
-        LSTM(32, input_shape=(lookback, 1)),
-        Dense(1)
-    ])
-    model.compile(optimizer="adam", loss="mse")
-    model.fit(X_train, y_train, epochs=12, batch_size=16, verbose=0)
-
-    last_window = scaled[-lookback:].reshape(1, lookback, 1)
-    preds = []
+    rolling_window = returns[-lookback:].copy()
+    predicted_returns = []
 
     for _ in range(forecast_horizon):
-        pred = model.predict(last_window, verbose=0)[0, 0]
-        preds.append(pred)
-        rolled = np.roll(last_window[0, :, 0], -1)
-        rolled[-1] = pred
-        last_window = rolled.reshape(1, lookback, 1)
+        pred = float(model.predict(rolling_window.reshape(1, -1))[0])
+        pred = float(np.clip(pred, -0.08, 0.08))
+        predicted_returns.append(pred)
+        rolling_window = np.roll(rolling_window, -1)
+        rolling_window[-1] = pred
 
-    preds = np.array(preds).reshape(-1, 1)
-    preds_unscaled = preds * (vmax - vmin) + vmin
+    last_price = float(close.iloc[-1])
+    forecast_prices = []
+    current_price = last_price
+    for r in predicted_returns:
+        current_price = current_price * (1 + r)
+        forecast_prices.append(current_price)
 
     last_date = pd.to_datetime(close.index[-1])
     future_dates = pd.bdate_range(last_date + pd.Timedelta(days=1), periods=forecast_horizon)
-
     history = close.tail(120)
 
     return {
         "symbol": symbol,
+        "model": "Lightweight autoregressive forecast",
         "history": [
             {"date": pd.to_datetime(idx).strftime("%Y-%m-%d"), "value": float(val)}
             for idx, val in history.items()
         ],
         "forecast": [
-            {"date": dt.strftime("%Y-%m-%d"), "value": float(val[0])}
-            for dt, val in zip(future_dates, preds_unscaled)
+            {"date": dt.strftime("%Y-%m-%d"), "value": float(val)}
+            for dt, val in zip(future_dates, forecast_prices)
         ]
     }
 
@@ -790,7 +777,7 @@ def api_lstm_forecast(payload: dict = Body(...)):
                 raise RuntimeError("No symbols found for selected group")
             symbol = candidates[0]
 
-        result = compute_lstm_forecast(
+        result = compute_lightweight_forecast(
             symbol=symbol,
             period=payload.get("period", "3y"),
             lookback=int(payload.get("lookback", 30)),
