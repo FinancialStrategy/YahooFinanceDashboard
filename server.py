@@ -3,24 +3,30 @@ from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 import json
 import time
+import warnings
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from scipy.stats import norm
+from hmmlearn.hmm import GaussianHMM
 
 from pypfopt import EfficientFrontier, expected_returns, risk_models
 from pypfopt.hierarchical_portfolio import HRPOpt
 from pypfopt.cla import CLA
+
+warnings.filterwarnings("ignore")
 
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 INDEX_FILE = PUBLIC_DIR / "index.html"
 UNIVERSE_FILE = BASE_DIR / "universe.json"
 
-app = FastAPI(title="Yahoo Finance Portfolio Dashboard")
+app = FastAPI(title="Institutional Quant Platform")
 
 RISK_FREE_RATE = 0.035
 BENCHMARK_SYMBOL = "^GSPC"
+TRADING_DAYS = 252
 
 CACHE = {
     "snapshot": None,
@@ -48,6 +54,22 @@ def flatten_universe(universe_dict):
     return rows
 
 
+def symbols_for_group(group_filter):
+    universe = load_universe()
+    items = flatten_universe(universe)
+
+    if not group_filter or group_filter == "ALL":
+        return [x["symbol"] for x in items]
+
+    return [x["symbol"] for x in items if x["group"] == group_filter]
+
+
+def label_map():
+    universe = load_universe()
+    items = flatten_universe(universe)
+    return {x["symbol"]: x["label"] for x in items}
+
+
 def safe_pct_return(series: pd.Series, lookback: int):
     series = series.dropna()
     if len(series) <= lookback:
@@ -66,8 +88,8 @@ def ytd_return(series: pd.Series):
 
     latest_date = pd.to_datetime(series.index[-1])
     year_start = pd.Timestamp(year=latest_date.year, month=1, day=1)
-
     series_ytd = series[series.index >= year_start]
+
     if len(series_ytd) < 2:
         return None
 
@@ -85,7 +107,7 @@ def annualized_volatility(close_series: pd.Series, window: int = 30):
     log_returns = np.log(close_series / close_series.shift(1)).dropna().tail(window)
     if len(log_returns) < 2:
         return None
-    return float(log_returns.std() * np.sqrt(252) * 100.0)
+    return float(log_returns.std() * np.sqrt(TRADING_DAYS) * 100.0)
 
 
 def avg_volume(volume_series: pd.Series, window: int = 20):
@@ -113,6 +135,8 @@ def extract_symbol_frame(download_df: pd.DataFrame, symbol: str, total_symbols: 
 
 
 def download_price_matrix(symbols, period="2y", interval="1d"):
+    symbols = list(dict.fromkeys(symbols))
+
     raw = yf.download(
         tickers=symbols,
         period=period,
@@ -146,7 +170,7 @@ def download_price_matrix(symbols, period="2y", interval="1d"):
     close_df = close_df.sort_index().ffill().dropna()
 
     if close_df.shape[1] < 3:
-        raise RuntimeError("Not enough valid symbols after cleaning for optimization")
+        raise RuntimeError("Not enough valid symbols after cleaning")
 
     return close_df
 
@@ -208,7 +232,6 @@ def build_snapshot():
                 "sparkline": spark
             }
             result_rows.append(row)
-
         except Exception:
             continue
 
@@ -223,7 +246,7 @@ def clean_weight_dict(weights: dict):
     out = {}
     for k, v in weights.items():
         fv = float(v)
-        if abs(fv) > 1e-6:
+        if abs(fv) > 1e-8:
             out[k] = round(fv, 6)
     return dict(sorted(out.items(), key=lambda x: x[1], reverse=True))
 
@@ -234,7 +257,7 @@ def build_frontier_points(mu, cov_matrix):
     try:
         ef_min = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
         ef_min.min_volatility()
-        min_ret, min_vol, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        min_ret, _, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
     except Exception:
         return points
 
@@ -263,8 +286,8 @@ def build_frontier_points(mu, cov_matrix):
 
 
 def optimize_with_strategy(prices, strategy, target_volatility, target_return):
-    mu = expected_returns.mean_historical_return(prices, frequency=252)
-    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=252).ledoit_wolf()
+    mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
+    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
     rets = expected_returns.returns_from_prices(prices)
 
     if strategy == "max_sharpe":
@@ -321,14 +344,32 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return):
     return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
 
 
-def build_optimization(symbols, strategy, target_volatility, target_return):
-    universe = load_universe()
-    items = flatten_universe(universe)
-    label_map = {x["symbol"]: x["label"] for x in items}
+def resolve_symbols(payload):
+    symbols = payload.get("symbols", [])
+    group_filter = payload.get("group_filter", "ALL")
+
+    if not symbols:
+        symbols = symbols_for_group(group_filter)
+
+    if group_filter and group_filter != "ALL":
+        allowed = set(symbols_for_group(group_filter))
+        symbols = [s for s in symbols if s in allowed]
 
     symbols = [s for s in symbols if s != BENCHMARK_SYMBOL]
     symbols = list(dict.fromkeys(symbols))
+    return symbols
 
+
+def build_portfolio_context(payload):
+    strategy = payload.get("strategy", "max_sharpe")
+    target_volatility = float(payload.get("target_volatility", 0.15))
+    target_return = float(payload.get("target_return", 0.10))
+    symbols = resolve_symbols(payload)
+
+    if len(symbols) < 3:
+        raise RuntimeError("At least 3 assets are required for portfolio construction")
+
+    labels = label_map()
     price_symbols = symbols + [BENCHMARK_SYMBOL]
     price_df = download_price_matrix(price_symbols, period="2y", interval="1d")
 
@@ -339,7 +380,7 @@ def build_optimization(symbols, strategy, target_volatility, target_return):
     prices = price_df.drop(columns=[BENCHMARK_SYMBOL], errors="ignore")
 
     if prices.shape[1] < 3:
-        raise RuntimeError("Not enough assets available for optimization")
+        raise RuntimeError("Not enough assets available after cleaning")
 
     mu, cov_matrix, weights, perf, frontier = optimize_with_strategy(
         prices=prices,
@@ -348,43 +389,38 @@ def build_optimization(symbols, strategy, target_volatility, target_return):
         target_return=target_return
     )
 
-    portfolio_return, portfolio_volatility, portfolio_sharpe = perf
-
     returns = prices.pct_change().dropna()
     benchmark_returns = benchmark_prices.pct_change().dropna()
 
     weight_series = pd.Series(weights).reindex(prices.columns).fillna(0.0)
-    portfolio_returns = returns.mul(weight_series, axis=1).sum(axis=1)
+    portfolio_returns = returns.mul(weight_series, axis=1).sum(axis=1).dropna()
 
     aligned = pd.concat(
         [portfolio_returns.rename("portfolio"), benchmark_returns.rename("benchmark")],
         axis=1
     ).dropna()
 
-    if aligned.empty:
-        beta = None
-        alpha_ann = None
-        tracking_error = None
-        information_ratio = None
-        benchmark_ann_return = None
-        benchmark_ann_vol = None
-    else:
-        beta = float(aligned["portfolio"].cov(aligned["benchmark"]) / aligned["benchmark"].var()) if aligned["benchmark"].var() != 0 else None
-        rf_daily = RISK_FREE_RATE / 252.0
-        alpha_ann = (
-            float(((aligned["portfolio"].mean() - rf_daily) - beta * (aligned["benchmark"].mean() - rf_daily)) * 252)
-            if beta is not None else None
-        )
-        diff = aligned["portfolio"] - aligned["benchmark"]
-        tracking_error = float(diff.std() * np.sqrt(252)) if diff.std() == diff.std() else None
-        information_ratio = float((diff.mean() * 252) / tracking_error) if tracking_error and tracking_error != 0 else None
-        benchmark_ann_return = float(aligned["benchmark"].mean() * 252)
-        benchmark_ann_vol = float(aligned["benchmark"].std() * np.sqrt(252))
+    beta = None
+    alpha_ann = None
+    tracking_error = None
+    information_ratio = None
+    benchmark_ann_return = None
+    benchmark_ann_vol = None
 
-    asset_vol = returns.std() * np.sqrt(252)
+    if not aligned.empty and aligned["benchmark"].var() != 0:
+        beta = float(aligned["portfolio"].cov(aligned["benchmark"]) / aligned["benchmark"].var())
+        rf_daily = RISK_FREE_RATE / TRADING_DAYS
+        alpha_ann = float(((aligned["portfolio"].mean() - rf_daily) - beta * (aligned["benchmark"].mean() - rf_daily)) * TRADING_DAYS)
+        diff = aligned["portfolio"] - aligned["benchmark"]
+        tracking_error = float(diff.std() * np.sqrt(TRADING_DAYS)) if diff.std() == diff.std() else None
+        information_ratio = float((diff.mean() * TRADING_DAYS) / tracking_error) if tracking_error and tracking_error != 0 else None
+        benchmark_ann_return = float(aligned["benchmark"].mean() * TRADING_DAYS)
+        benchmark_ann_vol = float(aligned["benchmark"].std() * np.sqrt(TRADING_DAYS))
+
+    asset_vol = returns.std() * np.sqrt(TRADING_DAYS)
     asset_df = pd.DataFrame({
         "symbol": prices.columns,
-        "label": [label_map.get(sym, sym) for sym in prices.columns],
+        "label": [labels.get(sym, sym) for sym in prices.columns],
         "expected_return": mu.reindex(prices.columns).values,
         "volatility": asset_vol.reindex(prices.columns).values
     }).replace([np.inf, -np.inf], np.nan).dropna()
@@ -399,37 +435,228 @@ def build_optimization(symbols, strategy, target_volatility, target_return):
     for sym, w in sorted(weights.items(), key=lambda x: x[1], reverse=True):
         weight_table.append({
             "symbol": sym,
-            "label": label_map.get(sym, sym),
+            "label": labels.get(sym, sym),
             "weight": float(w)
         })
 
     return {
+        "labels": labels,
         "strategy": strategy,
-        "benchmark_symbol": BENCHMARK_SYMBOL,
-        "risk_free_rate": RISK_FREE_RATE,
-        "used_symbols": list(prices.columns),
+        "prices": prices,
+        "returns": returns,
+        "weights": weights,
+        "weight_series": weight_series,
+        "portfolio_returns": portfolio_returns,
+        "benchmark_returns": benchmark_returns,
+        "aligned": aligned,
+        "frontier": frontier,
+        "top_assets": top_assets,
+        "weight_table": weight_table,
         "metrics": {
-            "expected_return": float(portfolio_return),
-            "volatility": float(portfolio_volatility),
-            "sharpe": float(portfolio_sharpe),
+            "expected_return": float(perf[0]),
+            "volatility": float(perf[1]),
+            "sharpe": float(perf[2]),
             "beta_vs_sp500": beta,
             "alpha_vs_sp500": alpha_ann,
             "tracking_error_vs_sp500": tracking_error,
             "information_ratio_vs_sp500": information_ratio,
             "benchmark_return": benchmark_ann_return,
             "benchmark_volatility": benchmark_ann_vol
-        },
-        "weights": weight_table,
-        "frontier": frontier,
-        "top_assets": [
-            {
-                "symbol": row["symbol"],
-                "label": row["label"],
-                "expected_return": float(row["expected_return"]),
-                "volatility": float(row["volatility"]),
-                "sharpe_proxy": float(row["sharpe_proxy"])
-            }
-            for _, row in top_assets.iterrows()
+        }
+    }
+
+
+def series_to_records(series):
+    out = []
+    for idx, val in series.dropna().items():
+        out.append({
+            "date": pd.to_datetime(idx).strftime("%Y-%m-%d"),
+            "value": float(val)
+        })
+    return out
+
+
+def compute_rolling_sharpe(portfolio_returns, window=63):
+    rf_daily = RISK_FREE_RATE / TRADING_DAYS
+    excess = portfolio_returns - rf_daily
+    sharpe = (excess.rolling(window).mean() / excess.rolling(window).std()) * np.sqrt(TRADING_DAYS)
+    return sharpe.replace([np.inf, -np.inf], np.nan)
+
+
+def compute_drawdown(portfolio_returns):
+    cumulative = (1 + portfolio_returns).cumprod()
+    running_max = cumulative.cummax()
+    drawdown = cumulative / running_max - 1.0
+    return cumulative, drawdown
+
+
+def compute_rolling_beta(aligned_returns, window=63):
+    cov = aligned_returns["portfolio"].rolling(window).cov(aligned_returns["benchmark"])
+    var = aligned_returns["benchmark"].rolling(window).var()
+    beta = cov / var
+    return beta.replace([np.inf, -np.inf], np.nan)
+
+
+def compute_hmm_regimes(portfolio_returns, n_states=3):
+    clean = portfolio_returns.dropna()
+    if len(clean) < 80:
+        raise RuntimeError("Not enough observations for HMM regime detection")
+
+    X = clean.values.reshape(-1, 1)
+    model = GaussianHMM(
+        n_components=n_states,
+        covariance_type="diag",
+        n_iter=200,
+        random_state=42
+    )
+    model.fit(X)
+    hidden_states = model.predict(X)
+
+    state_df = pd.DataFrame({
+        "date": clean.index,
+        "return": clean.values,
+        "state": hidden_states
+    })
+
+    state_means = state_df.groupby("state")["return"].mean().sort_values()
+    rank_map = {}
+    ordered_states = state_means.index.tolist()
+
+    if len(ordered_states) == 3:
+        rank_map[ordered_states[0]] = "Bear"
+        rank_map[ordered_states[1]] = "Neutral"
+        rank_map[ordered_states[2]] = "Bull"
+    else:
+        for i, s in enumerate(ordered_states):
+            rank_map[s] = f"State {i+1}"
+
+    state_df["label"] = state_df["state"].map(rank_map)
+
+    return [
+        {
+            "date": pd.to_datetime(row["date"]).strftime("%Y-%m-%d"),
+            "state": int(row["state"]),
+            "label": row["label"],
+            "return": float(row["return"])
+        }
+        for _, row in state_df.iterrows()
+    ]
+
+
+def compute_risk_metrics(portfolio_returns, confidence=0.95, horizon=1):
+    clean = portfolio_returns.dropna()
+    if len(clean) < 50:
+        raise RuntimeError("Not enough observations for risk calculations")
+
+    alpha = 1 - confidence
+
+    hist_q = clean.quantile(alpha)
+    hist_var = -float(hist_q) * np.sqrt(horizon)
+    hist_tail = clean[clean <= hist_q]
+    hist_cvar = -float(hist_tail.mean()) * np.sqrt(horizon) if len(hist_tail) > 0 else None
+
+    mu = float(clean.mean()) * horizon
+    sigma = float(clean.std()) * np.sqrt(horizon)
+    z = norm.ppf(alpha)
+
+    param_var = -(mu + z * sigma)
+    param_cvar = -(mu - sigma * (norm.pdf(z) / alpha))
+
+    return {
+        "confidence": confidence,
+        "horizon_days": horizon,
+        "historical_var": hist_var,
+        "historical_cvar": hist_cvar,
+        "historical_es": hist_cvar,
+        "parametric_var": float(param_var),
+        "parametric_cvar": float(param_cvar),
+        "parametric_es": float(param_cvar)
+    }
+
+
+def compute_lstm_forecast(symbol, period="3y", lookback=30, forecast_horizon=20):
+    try:
+        import tensorflow as tf
+        from tensorflow.keras.models import Sequential
+        from tensorflow.keras.layers import LSTM, Dense
+    except Exception as e:
+        raise RuntimeError(f"TensorFlow is not installed or could not be imported: {e}")
+
+    df = yf.download(
+        tickers=symbol,
+        period=period,
+        interval="1d",
+        auto_adjust=True,
+        progress=False,
+        threads=False
+    )
+
+    if df.empty:
+        raise RuntimeError("No data returned for LSTM forecast")
+
+    if isinstance(df.columns, pd.MultiIndex):
+        close = df["Close"][symbol].dropna()
+    else:
+        close = df["Close"].dropna()
+
+    if len(close) < 200:
+        raise RuntimeError("Not enough observations for LSTM forecast")
+
+    values = close.values.astype("float32").reshape(-1, 1)
+    vmin = values.min()
+    vmax = values.max()
+    if vmax == vmin:
+        raise RuntimeError("Series is constant; LSTM forecast not meaningful")
+
+    scaled = (values - vmin) / (vmax - vmin)
+
+    X, y = [], []
+    for i in range(lookback, len(scaled)):
+        X.append(scaled[i - lookback:i, 0])
+        y.append(scaled[i, 0])
+
+    X = np.array(X)
+    y = np.array(y)
+    X = X.reshape((X.shape[0], X.shape[1], 1))
+
+    split = int(len(X) * 0.85)
+    X_train, y_train = X[:split], y[:split]
+
+    tf.random.set_seed(42)
+    model = Sequential([
+        LSTM(32, input_shape=(lookback, 1)),
+        Dense(1)
+    ])
+    model.compile(optimizer="adam", loss="mse")
+    model.fit(X_train, y_train, epochs=12, batch_size=16, verbose=0)
+
+    last_window = scaled[-lookback:].reshape(1, lookback, 1)
+    preds = []
+
+    for _ in range(forecast_horizon):
+        pred = model.predict(last_window, verbose=0)[0, 0]
+        preds.append(pred)
+        rolled = np.roll(last_window[0, :, 0], -1)
+        rolled[-1] = pred
+        last_window = rolled.reshape(1, lookback, 1)
+
+    preds = np.array(preds).reshape(-1, 1)
+    preds_unscaled = preds * (vmax - vmin) + vmin
+
+    last_date = pd.to_datetime(close.index[-1])
+    future_dates = pd.bdate_range(last_date + pd.Timedelta(days=1), periods=forecast_horizon)
+
+    history = close.tail(120)
+
+    return {
+        "symbol": symbol,
+        "history": [
+            {"date": pd.to_datetime(idx).strftime("%Y-%m-%d"), "value": float(val)}
+            for idx, val in history.items()
+        ],
+        "forecast": [
+            {"date": dt.strftime("%Y-%m-%d"), "value": float(val[0])}
+            for dt, val in zip(future_dates, preds_unscaled)
         ]
     }
 
@@ -477,22 +704,98 @@ def api_snapshot(force: bool = False):
 @app.post("/api/optimization")
 def api_optimization(payload: dict = Body(...)):
     try:
-        strategy = payload.get("strategy", "max_sharpe")
-        target_volatility = float(payload.get("target_volatility", 0.15))
-        target_return = float(payload.get("target_return", 0.10))
-        symbols = payload.get("symbols", [])
+        ctx = build_portfolio_context(payload)
+        top_assets = ctx["top_assets"]
 
-        if not symbols:
-            universe = load_universe()
-            symbols = [x["symbol"] for x in flatten_universe(universe)]
+        result = {
+            "strategy": ctx["strategy"],
+            "benchmark_symbol": BENCHMARK_SYMBOL,
+            "risk_free_rate": RISK_FREE_RATE,
+            "used_symbols": list(ctx["prices"].columns),
+            "metrics": ctx["metrics"],
+            "weights": ctx["weight_table"],
+            "frontier": ctx["frontier"],
+            "top_assets": [
+                {
+                    "symbol": row["symbol"],
+                    "label": row["label"],
+                    "expected_return": float(row["expected_return"]),
+                    "volatility": float(row["volatility"]),
+                    "sharpe_proxy": float(row["sharpe_proxy"])
+                }
+                for _, row in top_assets.iterrows()
+            ]
+        }
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        result = build_optimization(
-            symbols=symbols,
-            strategy=strategy,
-            target_volatility=target_volatility,
-            target_return=target_return
+
+@app.post("/api/analytics")
+def api_analytics(payload: dict = Body(...)):
+    try:
+        ctx = build_portfolio_context(payload)
+
+        rolling_sharpe = compute_rolling_sharpe(ctx["portfolio_returns"], window=63)
+        cumulative, drawdown = compute_drawdown(ctx["portfolio_returns"])
+        rolling_beta = compute_rolling_beta(ctx["aligned"], window=63)
+        regimes = compute_hmm_regimes(ctx["portfolio_returns"], n_states=3)
+
+        result = {
+            "strategy": ctx["strategy"],
+            "benchmark_symbol": BENCHMARK_SYMBOL,
+            "rolling_sharpe": series_to_records(rolling_sharpe),
+            "cumulative": series_to_records(cumulative),
+            "drawdown": series_to_records(drawdown),
+            "rolling_beta": series_to_records(rolling_beta),
+            "regimes": regimes
+        }
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/risk")
+def api_risk(payload: dict = Body(...)):
+    try:
+        confidence = float(payload.get("confidence", 0.95))
+        horizon = int(payload.get("horizon_days", 1))
+
+        ctx = build_portfolio_context(payload)
+        risk_95 = compute_risk_metrics(ctx["portfolio_returns"], confidence=0.95, horizon=horizon)
+        risk_99 = compute_risk_metrics(ctx["portfolio_returns"], confidence=0.99, horizon=horizon)
+        risk_custom = compute_risk_metrics(ctx["portfolio_returns"], confidence=confidence, horizon=horizon)
+
+        result = {
+            "strategy": ctx["strategy"],
+            "benchmark_symbol": BENCHMARK_SYMBOL,
+            "custom": risk_custom,
+            "risk_95": risk_95,
+            "risk_99": risk_99
+        }
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/lstm-forecast")
+def api_lstm_forecast(payload: dict = Body(...)):
+    try:
+        group_filter = payload.get("group_filter", "ALL")
+        symbol = payload.get("symbol")
+
+        if not symbol:
+            candidates = symbols_for_group(group_filter)
+            if not candidates:
+                raise RuntimeError("No symbols found for selected group")
+            symbol = candidates[0]
+
+        result = compute_lstm_forecast(
+            symbol=symbol,
+            period=payload.get("period", "3y"),
+            lookback=int(payload.get("lookback", 30)),
+            forecast_horizon=int(payload.get("forecast_horizon", 20))
         )
         return JSONResponse(content=result)
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
