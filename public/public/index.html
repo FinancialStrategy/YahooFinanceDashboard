@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Institutional Quant Platform</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <style>
+    body {
+      background: #eef2f6;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #1f2937;
+    }
+
+    .card-soft {
+      border: none;
+      border-radius: 24px;
+      box-shadow: 0 16px 35px -10px rgba(0, 25, 45, 0.12);
+      background: #ffffff;
+    }
+
+    .sticky-topbar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      backdrop-filter: blur(8px);
+      background: rgba(232, 232, 232, 0.96);
+      border-radius: 22px;
+      padding: 16px 18px 10px 18px;
+    }
+
+    .main-title {
+      color: #7a1f2b;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+    }
+
+    .hero-icon {
+      background: linear-gradient(135deg, #7a1f2b 0%, #c2410c 30%, #eab308 62%, #2563eb 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: inline-block;
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.18));
+    }
+
+    .subtitle {
+      color: #4b5563;
+      font-size: 0.98rem;
+    }
+
+    .group-row td {
+      font-weight: 700;
+      background: linear-gradient(90deg, #f8fbff 0%, #ffffff 100%);
+      border-left: 6px solid var(--group-color);
+      font-size: 1.05rem;
+      padding: 0.9rem 1rem;
+    }
+
+    .table td, .table th {
+      vertical-align: middle;
+    }
+
+    .spark-wrap {
+      width: 120px;
+      height: 42px;
+    }
+
+    .metric-up {
+      color: #198754;
+      font-weight: 700;
+    }
+
+    .metric-down {
+      color: #dc3545;
+      font-weight: 700;
+    }
+
+    .weight-input {
+      max-width: 92px;
+      text-align: right;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .badge-soft {
+      background: #f7fafc;
+      color: #223;
+      border-radius: 999px;
+      padding: 0.5rem 0.9rem;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .weight-warning {
+      display: none;
+      margin-top: 14px;
+      border-radius: 16px;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: #6b7280;
+      font-size: 0.95rem;
+      margin-top: 18px;
+      padding-bottom: 8px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .nav-pills .nav-link {
+      border-radius: 999px;
+      font-weight: 700;
+      color: #4b5563;
+      background: #ffffff;
+      border: 1px solid rgba(0,0,0,.06);
+    }
+
+    .nav-pills .nav-link.active {
+      background: #7a1f2b;
+      color: #ffffff;
+      border-color: #7a1f2b;
+    }
+
+    .plot-box {
+      min-height: 430px;
+    }
+
+    .mini-kpi {
+      font-size: 1.55rem;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+
+    .section-title {
+      color: #7a1f2b;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+    }
+
+    .small-note {
+      font-size: 0.9rem;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+<div class="container-fluid px-4 py-4">
+  <div class="sticky-topbar pb-3 mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+      <div>
+        <h2 class="main-title mb-1">
+          <i class="bi bi-bar-chart-line-fill me-2 hero-icon"></i>
+          Institutional Quant Platform
+        </h2>
+        <div class="subtitle">
+          Expanded investment universe powered by MK FinTECH LabGEN@25 · Sparklines, summary metrics and Modern Portfolio Approach
+        </div>
+      </div>
+
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select id="group-filter" class="form-select rounded-pill" style="width:240px;">
+          <option value="ALL">All groups</option>
+        </select>
+        <button id="refresh-btn" class="btn btn-primary rounded-pill px-4">
+          <i class="bi bi-arrow-repeat me-2"></i>Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <ul class="nav nav-pills mb-4 gap-2" id="mainTabs" role="tablist">
+    <li class="nav-item"><button class="nav-link active px-4" data-bs-toggle="pill" data-bs-target="#overview-pane" type="button">Overview</button></li>
+    <li class="nav-item"><button class="nav-link px-4" data-bs-toggle="pill" data-bs-target="#construction-pane" type="button">Portfolio Construction</button></li>
+    <li class="nav-item"><button class="nav-link px-4" data-bs-toggle="pill" data-bs-target="#analytics-pane" type="button">Analytics</button></li>
+    <li class="nav-item"><button class="nav-link px-4" data-bs-toggle="pill" data-bs-target="#risk-pane" type="button">Risk Dashboard</button></li>
+    <li class="nav-item"><button class="nav-link px-4" data-bs-toggle="pill" data-bs-target="#forecast-pane" type="button">LSTM Forecast</button></li>
+  </ul>
+
+  <div class="tab-content">
+    <!-- OVERVIEW -->
+    <div class="tab-pane fade show active" id="overview-pane">
+      <div class="row g-3 mb-4">
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Instruments loaded</div>
+            <div id="card-count" class="fs-2 fw-bold">0</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Positive today</div>
+            <div id="card-positive" class="fs-2 fw-bold">0</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Average 30D vol</div>
+            <div id="card-vol" class="fs-2 fw-bold">0%</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card card-soft p-3">
+            <div class="text-muted small">Portfolio weight total</div>
+            <div id="card-weight" class="fs-2 fw-bold text-success">0%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card card-soft p-3 mb-3">
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <span class="badge-soft"><i class="bi bi-clock me-1"></i><span id="generated-at">ready</span></span>
+          <span class="badge-soft"><i class="bi bi-diagram-3 me-1"></i><span id="group-count">0 groups</span></span>
+          <span class="badge-soft"><i class="bi bi-database-check me-1"></i>Backend: FastAPI</span>
+          <span class="badge-soft"><i class="bi bi-graph-up-arrow me-1"></i>Source: Yahoo Finance</span>
+        </div>
+      </div>
+
+      <div class="card card-soft overflow-hidden">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-dark">
+              <tr>
+                <th style="width:22%">Instrument</th>
+                <th style="width:10%">Price</th>
+                <th style="width:10%">Daily</th>
+                <th style="width:10%">1M</th>
+                <th style="width:10%">3M</th>
+                <th style="width:10%">YTD</th>
+                <th style="width:10%">30D Vol</th>
+                <th style="width:10%">Avg Vol</th>
+                <th style="width:10%">Sparkline</th>
+                <th style="width:8%">Target</th>
+                <th style="width:8%">Weight</th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="weight-warning" class="alert alert-danger weight-warning" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        Total portfolio weight cannot exceed 100%.
+      </div>
+    </div>
+
+    <!-- CONSTRUCTION -->
+    <div class="tab-pane fade" id="construction-pane">
+      <div class="row g-3 mb-4">
+        <div class="col-lg-3">
+          <div class="card card-soft p-3 h-100">
+            <div class="section-title">Construction Controls</div>
+
+            <label class="form-label fw-semibold">Strategy</label>
+            <select id="opt-strategy" class="form-select mb-3">
+              <option value="max_sharpe">Max Sharpe</option>
+              <option value="min_volatility">Minimum Volatility</option>
+              <option value="max_quadratic_utility">Max Quadratic Utility</option>
+              <option value="efficient_risk">Efficient Risk</option>
+              <option value="efficient_return">Efficient Return</option>
+              <option value="hrp">Hierarchical Risk Parity (HRP)</option>
+              <option value="cla_max_sharpe">CLA Max Sharpe</option>
+              <option value="cla_min_volatility">CLA Min Volatility</option>
+            </select>
+
+            <label class="form-label fw-semibold">Target Volatility (%)</label>
+            <input id="target-volatility" type="number" class="form-control mb-3" value="15" step="0.5" min="1" max="80">
+
+            <label class="form-label fw-semibold">Target Return (%)</label>
+            <input id="target-return" type="number" class="form-control mb-3" value="12" step="0.5" min="1" max="80">
+
+            <div class="small-note mb-3">
+              Optimization automatically uses the currently selected asset class from the top-right filter.
+            </div>
+
+            <div class="small text-muted mb-3">
+              Benchmark: <strong>S&amp;P 500 Index</strong> · Risk-free rate: <strong>3.5% USD</strong>
+            </div>
+
+            <button id="run-optimization-btn" class="btn btn-primary rounded-pill w-100">
+              <i class="bi bi-play-circle me-2"></i>Run Construction
+            </button>
+          </div>
+        </div>
+
+        <div class="col-lg-9">
+          <div class="row g-3">
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Expected return</div><div id="opt-ret" class="mini-kpi">—</div></div></div>
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Volatility</div><div id="opt-vol" class="mini-kpi">—</div></div></div>
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Sharpe ratio</div><div id="opt-sharpe" class="mini-kpi">—</div></div></div>
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Beta vs S&amp;P 500</div><div id="opt-beta" class="mini-kpi">—</div></div></div>
+
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Alpha vs S&amp;P 500</div><div id="opt-alpha" class="mini-kpi">—</div></div></div>
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Tracking error</div><div id="opt-te" class="mini-kpi">—</div></div></div>
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Information ratio</div><div id="opt-ir" class="mini-kpi">—</div></div></div>
+            <div class="col-md-3"><div class="card card-soft p-3"><div class="text-muted small">Selected strategy</div><div id="opt-strategy-label" class="mini-kpi" style="font-size:1.1rem;">—</div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-lg-7">
+          <div class="card card-soft p-3">
+            <div class="section-title">Efficient Frontier</div>
+            <div id="frontier-chart" class="plot-box"></div>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="card card-soft p-3">
+            <div class="section-title">Top 10 Instruments · Return vs Volatility</div>
+            <div id="asset-scatter-chart" class="plot-box"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">Optimized Weights</div>
+            <div id="weights-bar-chart" class="plot-box"></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">Optimized Weight Table</div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Instrument</th>
+                    <th class="text-end">Weight</th>
+                  </tr>
+                </thead>
+                <tbody id="weights-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="construction-status" class="mt-3 text-muted small"></div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="tab-pane fade" id="analytics-pane">
+      <div class="row g-3 mb-4">
+        <div class="col-12">
+          <div class="card card-soft p-3">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div>
+                <div class="section-title mb-1">Portfolio Analytics</div>
+                <div class="small-note">Rolling statistics and market regime assessment for the selected asset class universe.</div>
+              </div>
+              <button id="run-analytics-btn" class="btn btn-primary rounded-pill px-4">
+                <i class="bi bi-bar-chart-steps me-2"></i>Run Analytics
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">Rolling Sharpe</div>
+            <div id="rolling-sharpe-chart" class="plot-box"></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">Drawdown</div>
+            <div id="drawdown-chart" class="plot-box"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">Rolling Beta vs S&amp;P 500</div>
+            <div id="rolling-beta-chart" class="plot-box"></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card card-soft p-3">
+            <div class="section-title">HMM Regime Detection</div>
+            <div id="regime-chart" class="plot-box"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="analytics-status" class="mt-3 text-muted small"></div>
+    </div>
+
+    <!-- RISK -->
+    <div class="tab-pane fade" id="risk-pane">
+      <div class="row g-3 mb-4">
+        <div class="col-lg-3">
+          <div class="card card-soft p-3 h-100">
+            <div class="section-title">Risk Controls</div>
+
+            <label class="form-label fw-semibold">Confidence Level</label>
+            <select id="risk-confidence" class="form-select mb-3">
+              <option value="0.95">95%</option>
+              <option value="0.99">99%</option>
+            </select>
+
+            <label class="form-label fw-semibold">Horizon (days)</label>
+            <input id="risk-horizon" type="number" class="form-control mb-3" value="1" min="1" max="60">
+
+            <div class="small-note mb-3">
+              Historical and parametric risk measures are computed on the optimized portfolio return series.
+            </div>
+
+            <button id="run-risk-btn" class="btn btn-primary rounded-pill w-100">
+              <i class="bi bi-shield-exclamation me-2"></i>Run Risk Dashboard
+            </button>
+          </div>
+        </div>
+
+        <div class="col-lg-9">
+          <div class="row g-3">
+            <div class="col-md-4"><div class="card card-soft p-3"><div class="text-muted small">Historical VaR</div><div id="risk-hvar" class="mini-kpi">—</div></div></div>
+            <div class="col-md-4"><div class="card card-soft p-3"><div class="text-muted small">Historical CVaR / ES</div><div id="risk-hcvar" class="mini-kpi">—</div></div></div>
+            <div class="col-md-4"><div class="card card-soft p-3"><div class="text-muted small">Parametric VaR</div><div id="risk-pvar" class="mini-kpi">—</div></div></div>
+
+            <div class="col-md-4"><div class="card card-soft p-3"><div class="text-muted small">Parametric CVaR / ES</div><div id="risk-pcvar" class="mini-kpi">—</div></div></div>
+            <div class="col-md-4"><div class="card card-soft p-3"><div class="text-muted small">95% Historical VaR</div><div id="risk95" class="mini-kpi">—</div></div></div>
+            <div class="col-md-4"><div class="card card-soft p-3"><div class="text-muted small">99% Historical VaR</div><div id="risk99" class="mini-kpi">—</div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="risk-status" class="mt-3 text-muted small"></div>
+    </div>
+
+    <!-- FORECAST -->
+    <div class="tab-pane fade" id="forecast-pane">
+      <div class="row g-3 mb-4">
+        <div class="col-lg-3">
+          <div class="card card-soft p-3 h-100">
+            <div class="section-title">Forecast Controls</div>
+
+            <label class="form-label fw-semibold">Symbol</label>
+            <select id="forecast-symbol" class="form-select mb-3"></select>
+
+            <label class="form-label fw-semibold">Lookback Window</label>
+            <input id="forecast-lookback" type="number" class="form-control mb-3" value="30" min="10" max="120">
+
+            <label class="form-label fw-semibold">Forecast Horizon</label>
+            <input id="forecast-horizon" type="number" class="form-control mb-3" value="20" min="5" max="60">
+
+            <button id="run-forecast-btn" class="btn btn-primary rounded-pill w-100">
+              <i class="bi bi-cpu me-2"></i>Run LSTM Forecast
+            </button>
+          </div>
+        </div>
+
+        <div class="col-lg-9">
+          <div class="card card-soft p-3">
+            <div class="section-title">LSTM Forecast</div>
+            <div id="forecast-chart" class="plot-box"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="forecast-status" class="mt-3 text-muted small"></div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    By MK LabGEN@25 Istanbul
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const charts = {};
+let allRows = [];
+let allGroups = [];
+
+function fmtNumber(x, digits = 2) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  return Number(x).toFixed(digits);
+}
+
+function fmtPctRaw(x, digits = 2) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  const v = Number(x);
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(digits)}%`;
+}
+
+function fmtPctDecimal(x, digits = 2) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  const v = Number(x) * 100;
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(digits)}%`;
+}
+
+function fmtVol(x) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  const n = Number(x);
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return n.toFixed(0);
+}
+
+function pctClass(x) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "";
+  return x >= 0 ? "metric-up" : "metric-down";
+}
+
+function normalizeChartId(symbol) {
+  return `chart-${String(symbol).replace(/[^A-Za-z0-9_-]/g, "")}`;
+}
+
+function renderSparkline(symbol, data) {
+  const canvas = document.getElementById(normalizeChartId(symbol));
+  if (!canvas || !Array.isArray(data) || data.length < 2) return;
+
+  if (charts[symbol]) charts[symbol].destroy();
+
+  const ctx = canvas.getContext("2d");
+  const positive = data[data.length - 1] >= data[0];
+
+  charts[symbol] = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.map(() => ""),
+      datasets: [{
+        data,
+        borderColor: positive ? "#198754" : "#dc3545",
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: false,
+        tension: 0.25
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: false, tooltip: false },
+      scales: { x: { display: false }, y: { display: false } }
+    }
+  });
+}
+
+function updateCards(rows) {
+  document.getElementById("card-count").textContent = rows.length;
+  const positive = rows.filter(r => (r.daily_change_pct ?? -999) > 0).length;
+  document.getElementById("card-positive").textContent = positive;
+
+  const vols = rows
+    .map(r => r.vol_30d_pct)
+    .filter(v => v !== null && v !== undefined && !Number.isNaN(v));
+
+  const avgVol = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
+  document.getElementById("card-vol").textContent = `${avgVol.toFixed(2)}%`;
+}
+
+function getTotalWeight() {
+  return allRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
+}
+
+function updateWeightTotal() {
+  const total = getTotalWeight();
+  const target = document.getElementById("card-weight");
+  const warning = document.getElementById("weight-warning");
+
+  target.textContent = `${total.toFixed(1)}%`;
+
+  if (total > 100.0) {
+    target.className = "fs-2 fw-bold text-danger";
+    warning.style.display = "block";
+  } else if (Math.abs(total - 100.0) < 0.05) {
+    target.className = "fs-2 fw-bold text-success";
+    warning.style.display = "none";
+  } else {
+    target.className = "fs-2 fw-bold text-warning";
+    warning.style.display = "none";
+  }
+}
+
+function initializeWeights(rows) {
+  const targetSum = rows.reduce((sum, row) => sum + (parseFloat(row.target) || 0), 0);
+
+  if (targetSum <= 100) {
+    rows.forEach(row => {
+      row.current_weight = Number(row.target || 0);
+    });
+    return;
+  }
+
+  const scale = 100 / targetSum;
+  let running = 0;
+
+  rows.forEach((row, idx) => {
+    if (idx < rows.length - 1) {
+      const scaled = Number((Number(row.target || 0) * scale).toFixed(1));
+      row.current_weight = scaled;
+      running += scaled;
+    } else {
+      row.current_weight = Number((100 - running).toFixed(1));
+    }
+  });
+}
+
+function applySavedWeights(newRows, oldRows) {
+  const oldMap = new Map(oldRows.map(r => [r.symbol, r.current_weight]));
+  let hasSaved = false;
+
+  newRows.forEach(row => {
+    if (oldMap.has(row.symbol)) {
+      row.current_weight = Number(oldMap.get(row.symbol) || 0);
+      hasSaved = true;
+    }
+  });
+
+  if (!hasSaved) {
+    initializeWeights(newRows);
+  } else {
+    const total = newRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
+    if (total > 100) initializeWeights(newRows);
+  }
+}
+
+function enforceWeightCap(symbol, inputEl) {
+  const row = allRows.find(r => r.symbol === symbol);
+  if (!row) return;
+
+  let newValue = parseFloat(inputEl.value);
+  if (Number.isNaN(newValue) || newValue < 0) newValue = 0;
+
+  row.current_weight = newValue;
+  const total = getTotalWeight();
+
+  if (total > 100) {
+    const excess = total - 100;
+    row.current_weight = Math.max(0, newValue - excess);
+    inputEl.value = row.current_weight.toFixed(1);
+  } else {
+    inputEl.value = row.current_weight.toFixed(1);
+  }
+
+  updateWeightTotal();
+}
+
+function buildRows(filterValue = "ALL") {
+  const tbody = document.getElementById("table-body");
+  tbody.innerHTML = "";
+
+  const visibleRows = filterValue === "ALL" ? allRows : allRows.filter(x => x.group === filterValue);
+
+  const groupMap = {};
+  visibleRows.forEach(r => {
+    if (!groupMap[r.group]) groupMap[r.group] = [];
+    groupMap[r.group].push(r);
+  });
+
+  Object.entries(groupMap).forEach(([groupName, items]) => {
+    const trGroup = document.createElement("tr");
+    trGroup.className = "group-row";
+    trGroup.innerHTML = `<td colspan="11" style="--group-color:${items[0].group_color}">${groupName} <span class="text-muted ms-2">(${items.length})</span></td>`;
+    tbody.appendChild(trGroup);
+
+    items.forEach(row => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>
+          <div class="fw-semibold">${row.label}</div>
+          <div class="text-muted small">${row.symbol}</div>
+        </td>
+        <td class="fw-semibold">${fmtNumber(row.price, 2)}</td>
+        <td class="${pctClass(row.daily_change_pct)}">${fmtPctRaw(row.daily_change_pct)}</td>
+        <td class="${pctClass(row.ret_1m_pct)}">${fmtPctRaw(row.ret_1m_pct)}</td>
+        <td class="${pctClass(row.ret_3m_pct)}">${fmtPctRaw(row.ret_3m_pct)}</td>
+        <td class="${pctClass(row.ytd_pct)}">${fmtPctRaw(row.ytd_pct)}</td>
+        <td>${fmtPctRaw(row.vol_30d_pct)}</td>
+        <td>${fmtVol(row.avg_volume_20d)}</td>
+        <td><div class="spark-wrap"><canvas id="${normalizeChartId(row.symbol)}"></canvas></div></td>
+        <td class="fw-semibold text-muted">${fmtNumber(row.target, 1)}%</td>
+        <td>
+          <input
+            type="number"
+            class="form-control weight-input"
+            value="${fmtNumber(row.current_weight, 1)}"
+            min="0"
+            max="100"
+            step="0.5"
+            data-symbol="${row.symbol}"
+          >
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  });
+
+  visibleRows.forEach(row => renderSparkline(row.symbol, row.sparkline));
+
+  document.querySelectorAll(".weight-input").forEach(input => {
+    input.addEventListener("input", function () {
+      const symbol = this.getAttribute("data-symbol");
+      enforceWeightCap(symbol, this);
+    });
+  });
+
+  updateCards(visibleRows);
+  updateWeightTotal();
+  populateForecastSymbolSelector();
+}
+
+function currentGroupFilter() {
+  return document.getElementById("group-filter").value || "ALL";
+}
+
+function filteredRows() {
+  const gf = currentGroupFilter();
+  return gf === "ALL" ? allRows : allRows.filter(r => r.group === gf);
+}
+
+function strategyLabel(v) {
+  const map = {
+    max_sharpe: "Max Sharpe",
+    min_volatility: "Minimum Volatility",
+    max_quadratic_utility: "Max Quadratic Utility",
+    efficient_risk: "Efficient Risk",
+    efficient_return: "Efficient Return",
+    hrp: "HRP",
+    cla_max_sharpe: "CLA Max Sharpe",
+    cla_min_volatility: "CLA Min Volatility"
+  };
+  return map[v] || v;
+}
+
+async function loadUniverse() {
+  const res = await fetch("/api/universe");
+  const data = await res.json();
+  allGroups = data.groups.map(g => g.name);
+
+  const filter = document.getElementById("group-filter");
+  filter.innerHTML = `<option value="ALL">All groups</option>`;
+
+  allGroups.forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g;
+    opt.textContent = g;
+    filter.appendChild(opt);
+  });
+
+  document.getElementById("group-count").textContent = `${allGroups.length} groups`;
+}
+
+async function loadSnapshot(force = false) {
+  const url = force ? "/api/snapshot?force=true" : "/api/snapshot";
+  const res = await fetch(url);
+  const data = await res.json();
+
+  const previousRows = [...allRows];
+  allRows = data.rows || [];
+  applySavedWeights(allRows, previousRows);
+
+  document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
+  buildRows(currentGroupFilter());
+}
+
+function basePayload() {
+  return {
+    symbols: filteredRows().map(r => r.symbol),
+    group_filter: currentGroupFilter(),
+    strategy: document.getElementById("opt-strategy").value,
+    target_volatility: (parseFloat(document.getElementById("target-volatility").value) || 15) / 100,
+    target_return: (parseFloat(document.getElementById("target-return").value) || 12) / 100
+  };
+}
+
+function renderOptimizationMetrics(data) {
+  const m = data.metrics || {};
+  document.getElementById("opt-ret").textContent = fmtPctDecimal(m.expected_return);
+  document.getElementById("opt-vol").textContent = fmtPctDecimal(m.volatility);
+  document.getElementById("opt-sharpe").textContent = fmtNumber(m.sharpe, 2);
+  document.getElementById("opt-beta").textContent = fmtNumber(m.beta_vs_sp500, 2);
+  document.getElementById("opt-alpha").textContent = fmtPctDecimal(m.alpha_vs_sp500);
+  document.getElementById("opt-te").textContent = fmtPctDecimal(m.tracking_error_vs_sp500);
+  document.getElementById("opt-ir").textContent = fmtNumber(m.information_ratio_vs_sp500, 2);
+  document.getElementById("opt-strategy-label").textContent = strategyLabel(data.strategy);
+}
+
+function renderFrontierChart(data) {
+  const frontier = data.frontier || [];
+  const metrics = data.metrics || {};
+
+  const lineTrace = {
+    x: frontier.map(p => p.volatility * 100),
+    y: frontier.map(p => p.expected_return * 100),
+    mode: "lines",
+    type: "scatter",
+    name: "Efficient Frontier",
+    line: { width: 3 }
+  };
+
+  const portfolioPoint = {
+    x: [Number(metrics.volatility || 0) * 100],
+    y: [Number(metrics.expected_return || 0) * 100],
+    mode: "markers+text",
+    type: "scatter",
+    name: "Selected Portfolio",
+    text: ["Portfolio"],
+    textposition: "top center",
+    marker: { size: 14, symbol: "diamond" }
+  };
+
+  Plotly.newPlot("frontier-chart", [lineTrace, portfolioPoint], {
+    margin: { l: 50, r: 20, t: 20, b: 50 },
+    xaxis: { title: "Volatility (%)" },
+    yaxis: { title: "Expected Return (%)" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white",
+    hovermode: "closest"
+  }, { responsive: true });
+}
+
+function renderAssetScatter(data) {
+  const assets = data.top_assets || [];
+
+  Plotly.newPlot("asset-scatter-chart", [{
+    x: assets.map(a => a.volatility * 100),
+    y: assets.map(a => a.expected_return * 100),
+    text: assets.map(a => `${a.label} (${a.symbol})`),
+    customdata: assets.map(a => a.sharpe_proxy),
+    mode: "markers+text",
+    type: "scatter",
+    textposition: "top center",
+    marker: { size: 14, opacity: 0.85 },
+    hovertemplate:
+      "<b>%{text}</b><br>" +
+      "Volatility: %{x:.2f}%<br>" +
+      "Expected return: %{y:.2f}%<br>" +
+      "Sharpe proxy: %{customdata:.2f}<extra></extra>"
+  }], {
+    margin: { l: 50, r: 20, t: 20, b: 50 },
+    xaxis: { title: "Volatility (%)" },
+    yaxis: { title: "Expected Return (%)" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white",
+    hovermode: "closest"
+  }, { responsive: true });
+}
+
+function renderWeightsBar(data) {
+  const weights = (data.weights || []).slice(0, 15).reverse();
+
+  Plotly.newPlot("weights-bar-chart", [{
+    x: weights.map(w => w.weight * 100),
+    y: weights.map(w => w.symbol),
+    type: "bar",
+    orientation: "h",
+    text: weights.map(w => `${(w.weight * 100).toFixed(2)}%`),
+    textposition: "outside"
+  }], {
+    margin: { l: 90, r: 25, t: 20, b: 40 },
+    xaxis: { title: "Weight (%)" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white"
+  }, { responsive: true });
+}
+
+function renderWeightsTable(data) {
+  const tbody = document.getElementById("weights-table-body");
+  tbody.innerHTML = "";
+
+  (data.weights || []).forEach(row => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="fw-semibold">${row.symbol}</td>
+      <td>${row.label}</td>
+      <td class="text-end fw-semibold">${(row.weight * 100).toFixed(2)}%</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function runOptimization() {
+  const btn = document.getElementById("run-optimization-btn");
+  const status = document.getElementById("construction-status");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running...';
+  status.textContent = "Portfolio construction is running...";
+
+  try {
+    const res = await fetch("/api/optimization", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(basePayload())
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Construction failed");
+
+    renderOptimizationMetrics(data);
+    renderFrontierChart(data);
+    renderAssetScatter(data);
+    renderWeightsBar(data);
+    renderWeightsTable(data);
+
+    status.textContent = `Construction complete · Universe size: ${data.used_symbols.length} · Benchmark: ${data.benchmark_symbol} · Risk-free rate: ${(data.risk_free_rate * 100).toFixed(2)}%`;
+  } catch (err) {
+    status.textContent = `Construction error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-circle me-2"></i>Run Construction';
+  }
+}
+
+function plotLine(containerId, records, titleY) {
+  Plotly.newPlot(containerId, [{
+    x: records.map(r => r.date),
+    y: records.map(r => r.value),
+    type: "scatter",
+    mode: "lines",
+    line: { width: 2 }
+  }], {
+    margin: { l: 55, r: 20, t: 20, b: 45 },
+    xaxis: { title: "Date" },
+    yaxis: { title: titleY },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white"
+  }, { responsive: true });
+}
+
+function plotDrawdown(containerId, records) {
+  Plotly.newPlot(containerId, [{
+    x: records.map(r => r.date),
+    y: records.map(r => r.value * 100),
+    type: "scatter",
+    mode: "lines",
+    fill: "tozeroy",
+    line: { width: 2 }
+  }], {
+    margin: { l: 55, r: 20, t: 20, b: 45 },
+    xaxis: { title: "Date" },
+    yaxis: { title: "Drawdown (%)" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white"
+  }, { responsive: true });
+}
+
+function plotRegimes(containerId, regimes) {
+  const stateMap = {};
+  regimes.forEach(r => {
+    if (!(r.label in stateMap)) stateMap[r.label] = [];
+    stateMap[r.label].push(r);
+  });
+
+  const traces = Object.entries(stateMap).map(([label, rows]) => ({
+    x: rows.map(r => r.date),
+    y: rows.map(r => r.state),
+    text: rows.map(r => `${label}<br>Return: ${(r.return * 100).toFixed(2)}%`),
+    mode: "markers",
+    type: "scatter",
+    name: label,
+    marker: { size: 7 }
+  }));
+
+  Plotly.newPlot(containerId, traces, {
+    margin: { l: 55, r: 20, t: 20, b: 45 },
+    xaxis: { title: "Date" },
+    yaxis: { title: "State" },
+    paper_bgcolor: "white",
+    plot_bgcolor: "white",
+    hovermode: "closest"
+  }, { responsive: true });
+}
+
+async function runAnalytics() {
+  const btn = document.getElementById("run-analytics-btn");
+  const status = document.getElementById("analytics-status");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running...';
+  status.textContent = "Analytics are running...";
+
+  try {
+    const res = await fetch("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(basePayload())
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Analytics failed");
+
+    plotLine("rolling-sharpe-chart", data.rolling_sharpe || [], "Sharpe");
+    plotDrawdown("drawdown-chart", data.drawdown || []);
+    plotLine("rolling-beta-chart", data.rolling_beta || [], "Beta");
+    plotRegimes("regime-chart", data.regimes || []);
+
+    status.textContent = `Analytics complete · Benchmark: ${data.benchmark_symbol}`;
+  } catch (err) {
+    status.textContent = `Analytics error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-bar-chart-steps me-2"></i>Run Analytics';
+  }
+}
+
+async function runRisk() {
+  const btn = document.getElementById("run-risk-btn");
+  const status = document.getElementById("risk-status");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running...';
+  status.textContent = "Risk dashboard is running...";
+
+  try {
+    const payload = {
+      ...basePayload(),
+      confidence: parseFloat(document.getElementById("risk-confidence").value || "0.95"),
+      horizon_days: parseInt(document.getElementById("risk-horizon").value || "1")
+    };
+
+    const res = await fetch("/api/risk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Risk dashboard failed");
+
+    const c = data.custom || {};
+    document.getElementById("risk-hvar").textContent = fmtPctDecimal(c.historical_var);
+    document.getElementById("risk-hcvar").textContent = fmtPctDecimal(c.historical_cvar);
+    document.getElementById("risk-pvar").textContent = fmtPctDecimal(c.parametric_var);
+    document.getElementById("risk-pcvar").textContent = fmtPctDecimal(c.parametric_cvar);
+    document.getElementById("risk95").textContent = fmtPctDecimal(data.risk_95?.historical_var);
+    document.getElementById("risk99").textContent = fmtPctDecimal(data.risk_99?.historical_var);
+
+    status.textContent = `Risk dashboard complete · Horizon: ${c.horizon_days || payload.horizon_days} day(s)`;
+  } catch (err) {
+    status.textContent = `Risk dashboard error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-shield-exclamation me-2"></i>Run Risk Dashboard';
+  }
+}
+
+function populateForecastSymbolSelector() {
+  const sel = document.getElementById("forecast-symbol");
+  const rows = filteredRows();
+
+  const previous = sel.value;
+  sel.innerHTML = "";
+
+  rows.forEach(r => {
+    const opt = document.createElement("option");
+    opt.value = r.symbol;
+    opt.textContent = `${r.symbol} — ${r.label}`;
+    sel.appendChild(opt);
+  });
+
+  if (rows.length && rows.some(r => r.symbol === previous)) {
+    sel.value = previous;
+  }
+}
+
+async function runForecast() {
+  const btn = document.getElementById("run-forecast-btn");
+  const status = document.getElementById("forecast-status");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running...';
+  status.textContent = "LSTM forecast is running...";
+
+  try {
+    const payload = {
+      group_filter: currentGroupFilter(),
+      symbol: document.getElementById("forecast-symbol").value,
+      lookback: parseInt(document.getElementById("forecast-lookback").value || "30"),
+      forecast_horizon: parseInt(document.getElementById("forecast-horizon").value || "20")
+    };
+
+    const res = await fetch("/api/lstm-forecast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Forecast failed");
+
+    const history = data.history || [];
+    const forecast = data.forecast || [];
+
+    Plotly.newPlot("forecast-chart", [
+      {
+        x: history.map(r => r.date),
+        y: history.map(r => r.value),
+        type: "scatter",
+        mode: "lines",
+        name: "History",
+        line: { width: 2 }
+      },
+      {
+        x: forecast.map(r => r.date),
+        y: forecast.map(r => r.value),
+        type: "scatter",
+        mode: "lines+markers",
+        name: "Forecast",
+        line: { width: 2, dash: "dash" }
+      }
+    ], {
+      margin: { l: 55, r: 20, t: 20, b: 45 },
+      xaxis: { title: "Date" },
+      yaxis: { title: "Price" },
+      paper_bgcolor: "white",
+      plot_bgcolor: "white"
+    }, { responsive: true });
+
+    status.textContent = `Forecast complete · Symbol: ${data.symbol}`;
+  } catch (err) {
+    status.textContent = `Forecast error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-cpu me-2"></i>Run LSTM Forecast';
+  }
+}
+
+document.getElementById("group-filter").addEventListener("change", () => {
+  buildRows(currentGroupFilter());
+});
+
+document.getElementById("refresh-btn").addEventListener("click", async () => {
+  await loadSnapshot(true);
+});
+
+document.getElementById("run-optimization-btn").addEventListener("click", runOptimization);
+document.getElementById("run-analytics-btn").addEventListener("click", runAnalytics);
+document.getElementById("run-risk-btn").addEventListener("click", runRisk);
+document.getElementById("run-forecast-btn").addEventListener("click", runForecast);
+
+(async function init() {
+  await loadUniverse();
+  await loadSnapshot(false);
+})();
+</script>
+</body>
+</html>
