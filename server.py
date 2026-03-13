@@ -440,6 +440,8 @@ def build_portfolio_context(payload):
             "weight": float(w)
         })
 
+    corr = returns.corr().fillna(0.0)
+
     return {
         "labels": labels,
         "strategy": strategy,
@@ -447,6 +449,8 @@ def build_portfolio_context(payload):
         "returns": returns,
         "weights": weights,
         "weight_series": weight_series,
+        "cov_matrix": cov_matrix,
+        "correlation_matrix": corr,
         "portfolio_returns": portfolio_returns,
         "benchmark_returns": benchmark_returns,
         "aligned": aligned,
@@ -575,6 +579,34 @@ def compute_risk_metrics(portfolio_returns, confidence=0.95, horizon=1):
     }
 
 
+def compute_risk_contributions(weight_series, cov_matrix, labels):
+    cov_aligned = cov_matrix.loc[weight_series.index, weight_series.index]
+    w = weight_series.values.reshape(-1, 1)
+    sigma = cov_aligned.values
+
+    portfolio_var = float(w.T @ sigma @ w)
+    if portfolio_var <= 0:
+        return []
+
+    portfolio_vol = np.sqrt(portfolio_var)
+    marginal_contrib = (sigma @ w) / portfolio_vol
+    component_contrib = w * marginal_contrib
+    pct_contrib = component_contrib / portfolio_vol
+
+    rows = []
+    for i, sym in enumerate(weight_series.index):
+        rows.append({
+            "symbol": sym,
+            "label": labels.get(sym, sym),
+            "weight": float(w[i, 0]),
+            "marginal_risk_contribution": float(marginal_contrib[i, 0]),
+            "component_risk_contribution": float(component_contrib[i, 0]),
+            "percent_risk_contribution": float(pct_contrib[i, 0])
+        })
+
+    return sorted(rows, key=lambda x: x["percent_risk_contribution"], reverse=True)
+
+
 def compute_lightweight_forecast(symbol, period="3y", lookback=30, forecast_horizon=20):
     df = yf.download(
         tickers=symbol,
@@ -694,6 +726,15 @@ def api_optimization(payload: dict = Body(...)):
         ctx = build_portfolio_context(payload)
         top_assets = ctx["top_assets"]
 
+        donut = [
+            {
+                "symbol": row["symbol"],
+                "label": row["label"],
+                "weight": row["weight"]
+            }
+            for row in ctx["weight_table"]
+        ]
+
         result = {
             "strategy": ctx["strategy"],
             "benchmark_symbol": BENCHMARK_SYMBOL,
@@ -701,6 +742,7 @@ def api_optimization(payload: dict = Body(...)):
             "used_symbols": list(ctx["prices"].columns),
             "metrics": ctx["metrics"],
             "weights": ctx["weight_table"],
+            "allocation_donut": donut,
             "frontier": ctx["frontier"],
             "top_assets": [
                 {
@@ -753,12 +795,26 @@ def api_risk(payload: dict = Body(...)):
         risk_99 = compute_risk_metrics(ctx["portfolio_returns"], confidence=0.99, horizon=horizon)
         risk_custom = compute_risk_metrics(ctx["portfolio_returns"], confidence=confidence, horizon=horizon)
 
+        risk_contributions = compute_risk_contributions(
+            ctx["weight_series"],
+            ctx["cov_matrix"],
+            ctx["labels"]
+        )
+
+        heatmap = {
+            "x": list(ctx["correlation_matrix"].columns),
+            "y": list(ctx["correlation_matrix"].index),
+            "z": ctx["correlation_matrix"].round(4).values.tolist()
+        }
+
         result = {
             "strategy": ctx["strategy"],
             "benchmark_symbol": BENCHMARK_SYMBOL,
             "custom": risk_custom,
             "risk_95": risk_95,
-            "risk_99": risk_99
+            "risk_99": risk_99,
+            "risk_contributions": risk_contributions,
+            "correlation_heatmap": heatmap
         }
         return JSONResponse(content=result)
     except Exception as e:
