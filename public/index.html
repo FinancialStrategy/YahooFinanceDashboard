@@ -6,6 +6,7 @@
   <title>Institutional Quant Platform</title>
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 
   <style>
@@ -334,7 +335,6 @@
         <button id="refresh-btn">Refresh</button>
       </div>
 
-      <!-- OVERVIEW -->
       <div id="overview-pane" class="tab-pane active">
         <div class="kpi-grid">
           <div class="kpi-box">
@@ -384,7 +384,6 @@
         </div>
       </div>
 
-      <!-- CONSTRUCTION -->
       <div id="construction-pane" class="tab-pane">
         <div class="toolbar">
           <label for="opt-strategy">Strategy</label>
@@ -463,14 +462,13 @@
         <div id="construction-status" class="status-line"></div>
       </div>
 
-      <!-- ANALYTICS -->
       <div id="analytics-pane" class="tab-pane">
         <div class="toolbar">
           <button id="run-analytics-btn">Run Analytics</button>
         </div>
 
         <div class="small-note">
-          Rolling Sharpe, Drawdown, Rolling Beta and HMM Regime Detection are computed only for the selected asset class.
+          Rolling Sharpe, Drawdown, Rolling Beta, HMM Regime Detection, cumulative comparison, benchmark-relative performance and rolling information ratio are computed only for the selected asset class.
         </div>
 
         <div class="two-col-equal">
@@ -495,10 +493,27 @@
           </div>
         </div>
 
+        <div class="two-col-equal">
+          <div class="panel-box">
+            <div class="section-title">Cumulative Return Comparison vs S&P 500</div>
+            <div id="cumulative-comparison-chart" class="medium-plot"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">Benchmark-Relative Performance</div>
+            <div id="relative-performance-chart" class="medium-plot"></div>
+          </div>
+        </div>
+
+        <div class="section-block" style="margin-top:16px;">
+          <div class="panel-box">
+            <div class="section-title">Rolling Information Ratio</div>
+            <div id="rolling-ir-chart" class="medium-plot"></div>
+          </div>
+        </div>
+
         <div id="analytics-status" class="status-line"></div>
       </div>
 
-      <!-- RISK -->
       <div id="risk-pane" class="tab-pane">
         <div class="toolbar">
           <label for="risk-confidence">Confidence</label>
@@ -555,7 +570,6 @@
         <div id="risk-status" class="status-line"></div>
       </div>
 
-      <!-- FORECAST -->
       <div id="forecast-pane" class="tab-pane">
         <div class="toolbar">
           <label for="forecast-symbol">Symbol</label>
@@ -1078,6 +1092,68 @@
       }, { responsive: true, displayModeBar: true });
     }
 
+    function plotCumulativeComparison(portfolioRecords, benchmarkRecords) {
+      Plotly.newPlot("cumulative-comparison-chart", [
+        {
+          x: portfolioRecords.map(r => r.date),
+          y: portfolioRecords.map(r => r.value),
+          type: "scatter",
+          mode: "lines",
+          name: "Portfolio",
+          line: { width: 3, color: "#7a0019" }
+        },
+        {
+          x: benchmarkRecords.map(r => r.date),
+          y: benchmarkRecords.map(r => r.value),
+          type: "scatter",
+          mode: "lines",
+          name: "S&P 500",
+          line: { width: 3, color: "#1f4e79" }
+        }
+      ], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Date", gridcolor: "#d8d8d8" },
+        yaxis: { title: "Cumulative Growth", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8",
+        legend: { orientation: "h" }
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    function plotRelativePerformance(records) {
+      Plotly.newPlot("relative-performance-chart", [{
+        x: records.map(r => r.date),
+        y: records.map(r => r.value * 100),
+        type: "scatter",
+        mode: "lines",
+        line: { width: 3, color: "#7a0019" },
+        hovertemplate: "Date: %{x}<br>Relative Performance: %{y:.2f}%<extra></extra>"
+      }], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Date", gridcolor: "#d8d8d8" },
+        yaxis: { title: "Relative Performance (%)", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    function plotRollingIR(records) {
+      Plotly.newPlot("rolling-ir-chart", [{
+        x: records.map(r => r.date),
+        y: records.map(r => r.value),
+        type: "scatter",
+        mode: "lines",
+        line: { width: 3, color: "#1f4e79" },
+        hovertemplate: "Date: %{x}<br>Rolling IR: %{y:.2f}<extra></extra>"
+      }], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Date", gridcolor: "#d8d8d8" },
+        yaxis: { title: "Information Ratio", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
     async function runAnalytics() {
       const btn = document.getElementById("run-analytics-btn");
       const status = document.getElementById("analytics-status");
@@ -1099,6 +1175,9 @@
         plotDrawdown(data.drawdown || []);
         plotLine("rolling-beta-chart", data.rolling_beta || [], "Beta", "#1f4e79");
         plotRegimes(data.regimes || []);
+        plotCumulativeComparison(data.portfolio_cumulative || [], data.benchmark_cumulative || []);
+        plotRelativePerformance(data.relative_performance || []);
+        plotRollingIR(data.rolling_information_ratio || []);
 
         status.textContent = `Analytics complete · Asset class: ${currentGroupFilter()}`;
       } catch (err) {
