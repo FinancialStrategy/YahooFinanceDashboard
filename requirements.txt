@@ -3,3 +3,5 @@ uvicorn==0.34.0
 yfinance==0.2.61
 pandas==2.2.3
 numpy==2.2.4
+pyportfolioopt==1.6.0
+packaging
