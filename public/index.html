@@ -142,28 +142,51 @@
     .kpi-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 16px;
+      gap: 14px;
+      margin-bottom: 18px;
     }
 
     .kpi-box {
-      background: #f7f7f7;
-      border: 1px solid #d4d4d4;
-      padding: 12px 12px;
-      min-height: 78px;
+      background: linear-gradient(180deg, #fbfbfb 0%, #f1f1f1 100%);
+      border: 1px solid #cfcfcf;
+      border-top: 4px solid var(--accent);
+      padding: 14px 14px 12px 14px;
+      min-height: 96px;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.8) inset;
     }
 
     .kpi-label {
-      font-size: 12px;
-      color: #555;
-      margin-bottom: 6px;
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
     }
 
     .kpi-value {
-      font-size: 26px;
-      font-weight: 700;
+      font-size: 30px;
+      font-weight: 800;
       line-height: 1.05;
-      color: #111;
+      color: #161616;
+    }
+
+    .kpi-subnote {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #777;
+    }
+
+    .kpi-positive {
+      color: #0a7f2e;
+    }
+
+    .kpi-negative {
+      color: #b30000;
+    }
+
+    .kpi-neutral {
+      color: #8a6200;
     }
 
     .status-line {
@@ -338,20 +361,27 @@
       <div id="overview-pane" class="tab-pane active">
         <div class="kpi-grid">
           <div class="kpi-box">
-            <div class="kpi-label">Instruments loaded</div>
+            <div class="kpi-label">Instruments Loaded</div>
             <div class="kpi-value" id="card-count">0</div>
+            <div class="kpi-subnote">Current selected asset class universe</div>
           </div>
+
           <div class="kpi-box">
-            <div class="kpi-label">Positive today</div>
+            <div class="kpi-label">Positive Today</div>
             <div class="kpi-value" id="card-positive">0</div>
+            <div class="kpi-subnote">Number of instruments with positive daily move</div>
           </div>
+
           <div class="kpi-box">
-            <div class="kpi-label">Average 30D vol</div>
+            <div class="kpi-label">Average 30D Volatility</div>
             <div class="kpi-value" id="card-vol">0%</div>
+            <div class="kpi-subnote">Mean annualized volatility across visible instruments</div>
           </div>
+
           <div class="kpi-box">
-            <div class="kpi-label">Portfolio weight total</div>
+            <div class="kpi-label">Portfolio Weight Total</div>
             <div class="kpi-value" id="card-weight">0%</div>
+            <div class="kpi-subnote">Visible asset class weight allocation</div>
           </div>
         </div>
 
@@ -415,8 +445,8 @@
           <div class="kpi-box"><div class="kpi-label">Expected return</div><div class="kpi-value" id="opt-ret">—</div></div>
           <div class="kpi-box"><div class="kpi-label">Volatility</div><div class="kpi-value" id="opt-vol">—</div></div>
           <div class="kpi-box"><div class="kpi-label">Sharpe ratio</div><div class="kpi-value" id="opt-sharpe">—</div></div>
-          <div class="kpi-box"><div class="kpi-label">Beta vs S&P 500</div><div class="kpi-value" id="opt-beta">—</div></div>
-          <div class="kpi-box"><div class="kpi-label">Alpha vs S&P 500</div><div class="kpi-value" id="opt-alpha">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Beta vs S&amp;P 500</div><div class="kpi-value" id="opt-beta">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Alpha vs S&amp;P 500</div><div class="kpi-value" id="opt-alpha">—</div></div>
           <div class="kpi-box"><div class="kpi-label">Tracking error</div><div class="kpi-value" id="opt-te">—</div></div>
           <div class="kpi-box"><div class="kpi-label">Information ratio</div><div class="kpi-value" id="opt-ir">—</div></div>
           <div class="kpi-box"><div class="kpi-label">Selected strategy</div><div class="kpi-value" id="opt-strategy-label" style="font-size:18px;">—</div></div>
@@ -484,7 +514,7 @@
 
         <div class="two-col-equal">
           <div class="panel-box">
-            <div class="section-title">Rolling Beta vs S&P 500</div>
+            <div class="section-title">Rolling Beta vs S&amp;P 500</div>
             <div id="rolling-beta-chart" class="medium-plot"></div>
           </div>
           <div class="panel-box">
@@ -495,7 +525,7 @@
 
         <div class="two-col-equal">
           <div class="panel-box">
-            <div class="section-title">Cumulative Return Comparison vs S&P 500</div>
+            <div class="section-title">Cumulative Return Comparison vs S&amp;P 500</div>
             <div id="cumulative-comparison-chart" class="medium-plot"></div>
           </div>
           <div class="panel-box">
@@ -681,7 +711,8 @@
     }
 
     function getTotalWeight() {
-      return allRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
+      const visibleRows = filteredRows();
+      return visibleRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
     }
 
     function updateWeightTotal() {
@@ -690,15 +721,16 @@
       const warning = document.getElementById("weight-warning");
 
       el.textContent = `${total.toFixed(1)}%`;
+      el.classList.remove("kpi-positive", "kpi-negative", "kpi-neutral");
 
       if (total > 100) {
-        el.style.color = "#b30000";
+        el.classList.add("kpi-negative");
         warning.style.display = "block";
       } else if (Math.abs(total - 100) < 0.05) {
-        el.style.color = "#0a7f2e";
+        el.classList.add("kpi-positive");
         warning.style.display = "none";
       } else {
-        el.style.color = "#8a6200";
+        el.classList.add("kpi-neutral");
         warning.style.display = "none";
       }
     }
@@ -761,12 +793,42 @@
     }
 
     function updateOverviewCards(rows) {
-      document.getElementById("card-count").textContent = rows.length;
-      document.getElementById("card-positive").textContent = rows.filter(r => (r.daily_change_pct ?? -999) > 0).length;
+      const visibleRows = rows || filteredRows();
 
-      const vols = rows.map(r => r.vol_30d_pct).filter(v => v !== null && v !== undefined && !Number.isNaN(v));
-      const avgVol = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
-      document.getElementById("card-vol").textContent = `${avgVol.toFixed(2)}%`;
+      document.getElementById("card-count").textContent = visibleRows.length;
+
+      const positiveCount = visibleRows.filter(r => {
+        const v = r.daily_change_pct;
+        return v !== null && v !== undefined && !Number.isNaN(v) && Number(v) > 0;
+      }).length;
+
+      const positiveEl = document.getElementById("card-positive");
+      positiveEl.textContent = positiveCount;
+      positiveEl.classList.remove("kpi-positive", "kpi-negative", "kpi-neutral");
+
+      if (positiveCount > 0) {
+        positiveEl.classList.add("kpi-positive");
+      } else {
+        positiveEl.classList.add("kpi-neutral");
+      }
+
+      const vols = visibleRows
+        .map(r => r.vol_30d_pct)
+        .filter(v => v !== null && v !== undefined && !Number.isNaN(v));
+
+      const avgVol = vols.length ? vols.reduce((a, b) => a + Number(b), 0) / vols.length : 0;
+
+      const volEl = document.getElementById("card-vol");
+      volEl.textContent = `${avgVol.toFixed(2)}%`;
+      volEl.classList.remove("kpi-positive", "kpi-negative", "kpi-neutral");
+
+      if (avgVol >= 25) {
+        volEl.classList.add("kpi-negative");
+      } else if (avgVol >= 12) {
+        volEl.classList.add("kpi-neutral");
+      } else {
+        volEl.classList.add("kpi-positive");
+      }
     }
 
     function buildRows(filterValue = "ALL") {
@@ -1379,6 +1441,8 @@
 
     document.getElementById("group-filter").addEventListener("change", () => {
       buildRows(currentGroupFilter());
+      updateOverviewCards(filteredRows());
+      updateWeightTotal();
     });
 
     document.getElementById("refresh-btn").addEventListener("click", async () => {
