@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 import json
@@ -8,6 +8,10 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from pypfopt import EfficientFrontier, expected_returns, risk_models
+from pypfopt.hierarchical_portfolio import HRPOpt
+from pypfopt.cla import CLA
+
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 INDEX_FILE = PUBLIC_DIR / "index.html"
@@ -15,15 +19,20 @@ UNIVERSE_FILE = BASE_DIR / "universe.json"
 
 app = FastAPI(title="Yahoo Finance Portfolio Dashboard")
 
+RISK_FREE_RATE = 0.035
+BENCHMARK_SYMBOL = "^GSPC"
+
 CACHE = {
     "snapshot": None,
     "timestamp": 0
 }
 CACHE_TTL_SECONDS = 600
 
+
 def load_universe():
     with open(UNIVERSE_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 def flatten_universe(universe_dict):
     rows = []
@@ -38,6 +47,7 @@ def flatten_universe(universe_dict):
             })
     return rows
 
+
 def safe_pct_return(series: pd.Series, lookback: int):
     series = series.dropna()
     if len(series) <= lookback:
@@ -47,6 +57,7 @@ def safe_pct_return(series: pd.Series, lookback: int):
     if start == 0:
         return None
     return (end / start - 1.0) * 100.0
+
 
 def ytd_return(series: pd.Series):
     series = series.dropna()
@@ -66,6 +77,7 @@ def ytd_return(series: pd.Series):
         return None
     return (end / start - 1.0) * 100.0
 
+
 def annualized_volatility(close_series: pd.Series, window: int = 30):
     close_series = close_series.dropna()
     if len(close_series) < window + 1:
@@ -75,11 +87,13 @@ def annualized_volatility(close_series: pd.Series, window: int = 30):
         return None
     return float(log_returns.std() * np.sqrt(252) * 100.0)
 
+
 def avg_volume(volume_series: pd.Series, window: int = 20):
     volume_series = volume_series.dropna()
     if len(volume_series) < 1:
         return None
     return float(volume_series.tail(window).mean())
+
 
 def extract_symbol_frame(download_df: pd.DataFrame, symbol: str, total_symbols: int):
     if total_symbols == 1:
@@ -96,6 +110,46 @@ def extract_symbol_frame(download_df: pd.DataFrame, symbol: str, total_symbols: 
             return download_df[symbol].copy()
 
     raise KeyError(f"Data not found for {symbol}")
+
+
+def download_price_matrix(symbols, period="2y", interval="1d"):
+    raw = yf.download(
+        tickers=symbols,
+        period=period,
+        interval=interval,
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+        group_by="ticker"
+    )
+
+    if raw.empty:
+        raise RuntimeError("Yahoo Finance returned empty dataset")
+
+    close_df = pd.DataFrame()
+    total_symbols = len(symbols)
+
+    for symbol in symbols:
+        try:
+            sdf = extract_symbol_frame(raw, symbol, total_symbols).copy()
+            sdf = sdf.dropna(how="all")
+            if "Close" in sdf.columns:
+                close_df[symbol] = sdf["Close"]
+        except Exception:
+            continue
+
+    if close_df.empty:
+        raise RuntimeError("No valid close-price matrix could be built")
+
+    min_obs = max(120, int(0.65 * len(close_df)))
+    close_df = close_df.dropna(axis=1, thresh=min_obs)
+    close_df = close_df.sort_index().ffill().dropna()
+
+    if close_df.shape[1] < 3:
+        raise RuntimeError("Not enough valid symbols after cleaning for optimization")
+
+    return close_df
+
 
 def build_snapshot():
     universe = load_universe()
@@ -140,7 +194,7 @@ def build_snapshot():
             row = {
                 "group": item["group"],
                 "group_color": item["group_color"],
-                "symbol": symbol,
+                "symbol": item["symbol"],
                 "label": item["label"],
                 "target": item["target"],
                 "price": last_price,
@@ -164,13 +218,236 @@ def build_snapshot():
         "rows": result_rows
     }
 
+
+def clean_weight_dict(weights: dict):
+    out = {}
+    for k, v in weights.items():
+        fv = float(v)
+        if abs(fv) > 1e-6:
+            out[k] = round(fv, 6)
+    return dict(sorted(out.items(), key=lambda x: x[1], reverse=True))
+
+
+def build_frontier_points(mu, cov_matrix):
+    points = []
+
+    try:
+        ef_min = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef_min.min_volatility()
+        min_ret, min_vol, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+    except Exception:
+        return points
+
+    max_target = min(max(float(mu.quantile(0.75)), min_ret + 0.03), 0.60)
+    min_target = max(min_ret + 0.001, 0.001)
+
+    if max_target <= min_target:
+        max_target = min_target + 0.05
+
+    targets = np.linspace(min_target, max_target, 25)
+
+    for target in targets:
+        try:
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+            ef.efficient_return(float(target))
+            exp_ret, vol, sharpe = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+            points.append({
+                "expected_return": float(exp_ret),
+                "volatility": float(vol),
+                "sharpe": float(sharpe)
+            })
+        except Exception:
+            continue
+
+    return points
+
+
+def optimize_with_strategy(prices, strategy, target_volatility, target_return):
+    mu = expected_returns.mean_historical_return(prices, frequency=252)
+    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=252).ledoit_wolf()
+    rets = expected_returns.returns_from_prices(prices)
+
+    if strategy == "max_sharpe":
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
+        weights = ef.clean_weights()
+        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "min_volatility":
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef.min_volatility()
+        weights = ef.clean_weights()
+        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "max_quadratic_utility":
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef.max_quadratic_utility(risk_aversion=1.0)
+        weights = ef.clean_weights()
+        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "efficient_risk":
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef.efficient_risk(target_volatility=float(target_volatility))
+        weights = ef.clean_weights()
+        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "efficient_return":
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef.efficient_return(target_return=float(target_return))
+        weights = ef.clean_weights()
+        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "hrp":
+        hrp = HRPOpt(rets)
+        weights = hrp.optimize()
+        perf = hrp.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "cla_max_sharpe":
+        cla = CLA(mu, cov_matrix, weight_bounds=(0, 1))
+        cla.max_sharpe()
+        weights = cla.clean_weights()
+        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "cla_min_volatility":
+        cla = CLA(mu, cov_matrix, weight_bounds=(0, 1))
+        cla.min_volatility()
+        weights = cla.clean_weights()
+        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
+    frontier = build_frontier_points(mu, cov_matrix)
+    return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
+
+
+def build_optimization(symbols, strategy, target_volatility, target_return):
+    universe = load_universe()
+    items = flatten_universe(universe)
+    label_map = {x["symbol"]: x["label"] for x in items}
+
+    symbols = [s for s in symbols if s != BENCHMARK_SYMBOL]
+    symbols = list(dict.fromkeys(symbols))
+
+    price_symbols = symbols + [BENCHMARK_SYMBOL]
+    price_df = download_price_matrix(price_symbols, period="2y", interval="1d")
+
+    if BENCHMARK_SYMBOL not in price_df.columns:
+        raise RuntimeError("Benchmark could not be downloaded")
+
+    benchmark_prices = price_df[BENCHMARK_SYMBOL].copy()
+    prices = price_df.drop(columns=[BENCHMARK_SYMBOL], errors="ignore")
+
+    if prices.shape[1] < 3:
+        raise RuntimeError("Not enough assets available for optimization")
+
+    mu, cov_matrix, weights, perf, frontier = optimize_with_strategy(
+        prices=prices,
+        strategy=strategy,
+        target_volatility=target_volatility,
+        target_return=target_return
+    )
+
+    portfolio_return, portfolio_volatility, portfolio_sharpe = perf
+
+    returns = prices.pct_change().dropna()
+    benchmark_returns = benchmark_prices.pct_change().dropna()
+
+    weight_series = pd.Series(weights).reindex(prices.columns).fillna(0.0)
+    portfolio_returns = returns.mul(weight_series, axis=1).sum(axis=1)
+
+    aligned = pd.concat(
+        [portfolio_returns.rename("portfolio"), benchmark_returns.rename("benchmark")],
+        axis=1
+    ).dropna()
+
+    if aligned.empty:
+        beta = None
+        alpha_ann = None
+        tracking_error = None
+        information_ratio = None
+        benchmark_ann_return = None
+        benchmark_ann_vol = None
+    else:
+        beta = float(aligned["portfolio"].cov(aligned["benchmark"]) / aligned["benchmark"].var()) if aligned["benchmark"].var() != 0 else None
+        rf_daily = RISK_FREE_RATE / 252.0
+        alpha_ann = (
+            float(((aligned["portfolio"].mean() - rf_daily) - beta * (aligned["benchmark"].mean() - rf_daily)) * 252)
+            if beta is not None else None
+        )
+        diff = aligned["portfolio"] - aligned["benchmark"]
+        tracking_error = float(diff.std() * np.sqrt(252)) if diff.std() == diff.std() else None
+        information_ratio = float((diff.mean() * 252) / tracking_error) if tracking_error and tracking_error != 0 else None
+        benchmark_ann_return = float(aligned["benchmark"].mean() * 252)
+        benchmark_ann_vol = float(aligned["benchmark"].std() * np.sqrt(252))
+
+    asset_vol = returns.std() * np.sqrt(252)
+    asset_df = pd.DataFrame({
+        "symbol": prices.columns,
+        "label": [label_map.get(sym, sym) for sym in prices.columns],
+        "expected_return": mu.reindex(prices.columns).values,
+        "volatility": asset_vol.reindex(prices.columns).values
+    }).replace([np.inf, -np.inf], np.nan).dropna()
+
+    asset_df["sharpe_proxy"] = (asset_df["expected_return"] - RISK_FREE_RATE) / asset_df["volatility"]
+    top_assets = asset_df.sort_values(
+        ["sharpe_proxy", "expected_return"],
+        ascending=[False, False]
+    ).head(10)
+
+    weight_table = []
+    for sym, w in sorted(weights.items(), key=lambda x: x[1], reverse=True):
+        weight_table.append({
+            "symbol": sym,
+            "label": label_map.get(sym, sym),
+            "weight": float(w)
+        })
+
+    return {
+        "strategy": strategy,
+        "benchmark_symbol": BENCHMARK_SYMBOL,
+        "risk_free_rate": RISK_FREE_RATE,
+        "used_symbols": list(prices.columns),
+        "metrics": {
+            "expected_return": float(portfolio_return),
+            "volatility": float(portfolio_volatility),
+            "sharpe": float(portfolio_sharpe),
+            "beta_vs_sp500": beta,
+            "alpha_vs_sp500": alpha_ann,
+            "tracking_error_vs_sp500": tracking_error,
+            "information_ratio_vs_sp500": information_ratio,
+            "benchmark_return": benchmark_ann_return,
+            "benchmark_volatility": benchmark_ann_vol
+        },
+        "weights": weight_table,
+        "frontier": frontier,
+        "top_assets": [
+            {
+                "symbol": row["symbol"],
+                "label": row["label"],
+                "expected_return": float(row["expected_return"]),
+                "volatility": float(row["volatility"]),
+                "sharpe_proxy": float(row["sharpe_proxy"])
+            }
+            for _, row in top_assets.iterrows()
+        ]
+    }
+
+
 @app.get("/")
 def root():
     return FileResponse(INDEX_FILE)
 
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
+
+
 @app.get("/api/universe")
 def api_universe():
     return JSONResponse(content=load_universe())
+
 
 @app.get("/api/snapshot")
 def api_snapshot(force: bool = False):
@@ -194,9 +471,28 @@ def api_snapshot(force: bool = False):
             stale["stale"] = True
             stale["error"] = str(e)
             return JSONResponse(content=stale)
-
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/healthz")
-def healthz():
-    return {"ok": True}
+
+@app.post("/api/optimization")
+def api_optimization(payload: dict = Body(...)):
+    try:
+        strategy = payload.get("strategy", "max_sharpe")
+        target_volatility = float(payload.get("target_volatility", 0.15))
+        target_return = float(payload.get("target_return", 0.10))
+        symbols = payload.get("symbols", [])
+
+        if not symbols:
+            universe = load_universe()
+            symbols = [x["symbol"] for x in flatten_universe(universe)]
+
+        result = build_optimization(
+            symbols=symbols,
+            strategy=strategy,
+            target_volatility=target_volatility,
+            target_return=target_return
+        )
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
