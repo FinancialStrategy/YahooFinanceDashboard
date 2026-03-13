@@ -502,6 +502,19 @@ def compute_rolling_beta(aligned_returns, window=63):
     return beta.replace([np.inf, -np.inf], np.nan)
 
 
+def compute_relative_performance(aligned_returns):
+    relative = (1 + aligned_returns["portfolio"]).cumprod() / (1 + aligned_returns["benchmark"]).cumprod() - 1.0
+    return relative.replace([np.inf, -np.inf], np.nan)
+
+
+def compute_rolling_information_ratio(aligned_returns, window=63):
+    active = aligned_returns["portfolio"] - aligned_returns["benchmark"]
+    rolling_mean = active.rolling(window).mean() * TRADING_DAYS
+    rolling_te = active.rolling(window).std() * np.sqrt(TRADING_DAYS)
+    ir = rolling_mean / rolling_te
+    return ir.replace([np.inf, -np.inf], np.nan)
+
+
 def compute_hmm_regimes(portfolio_returns, n_states=3):
     clean = portfolio_returns.dropna()
     if len(clean) < 80:
@@ -770,6 +783,11 @@ def api_analytics(payload: dict = Body(...)):
         rolling_beta = compute_rolling_beta(ctx["aligned"], window=63)
         regimes = compute_hmm_regimes(ctx["portfolio_returns"], n_states=3)
 
+        benchmark_cumulative = (1 + ctx["aligned"]["benchmark"]).cumprod()
+        portfolio_cumulative = (1 + ctx["aligned"]["portfolio"]).cumprod()
+        relative_performance = compute_relative_performance(ctx["aligned"])
+        rolling_ir = compute_rolling_information_ratio(ctx["aligned"], window=63)
+
         result = {
             "strategy": ctx["strategy"],
             "benchmark_symbol": BENCHMARK_SYMBOL,
@@ -777,7 +795,11 @@ def api_analytics(payload: dict = Body(...)):
             "cumulative": series_to_records(cumulative),
             "drawdown": series_to_records(drawdown),
             "rolling_beta": series_to_records(rolling_beta),
-            "regimes": regimes
+            "regimes": regimes,
+            "portfolio_cumulative": series_to_records(portfolio_cumulative),
+            "benchmark_cumulative": series_to_records(benchmark_cumulative),
+            "relative_performance": series_to_records(relative_performance),
+            "rolling_information_ratio": series_to_records(rolling_ir)
         }
         return JSONResponse(content=result)
     except Exception as e:
