@@ -330,6 +330,46 @@
         font-size: 24px;
       }
     }
+  
+    .target-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      padding: 10px;
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .target-row {
+      display: grid;
+      grid-template-columns: 160px 1fr 70px 70px;
+      gap: 10px;
+      align-items: center;
+    }
+    .target-row .tlabel {
+      font-weight: 700;
+      color: #2b2b2b;
+      font-size: 13px;
+    }
+    .target-row input[type="range"] {
+      width: 100%;
+    }
+    .target-row .tval {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      color: #111;
+    }
+    .target-row input[type="number"] {
+      width: 100%;
+      padding: 6px 6px;
+      border: 1px solid #cfcfcf;
+      border-radius: 8px;
+      font-size: 12px;
+      background: #fff;
+    }
+
   </style>
 </head>
 <body>
@@ -437,6 +477,26 @@
           <button id="run-ta-btn">Run Technical Analysis</button>
         </div>
 
+
+        <div class="section-block" style="margin-top:10px;">
+          <div class="section-title">Asset Class Prior Targets (Hard Constraints)</div>
+          <div class="small-note">
+            Define asset-class allocation targets. Click “Apply to instruments proportionally” to distribute targets across instruments.
+            These targets are sent as hard constraints to the optimizer.
+          </div>
+
+          <div id="class-targets-container" class="target-container"></div>
+
+          <div class="toolbar" style="margin-top:10px;">
+            <div class="small-note" id="class-targets-total" style="margin-right:auto;">Total: 100%</div>
+            <button id="class-targets-normalize-btn" type="button">Normalize to 100%</button>
+            <button id="class-targets-reset-btn" type="button">Reset from current weights</button>
+            <button id="apply-class-targets-btn" type="button">Apply to instruments proportionally</button>
+          </div>
+
+          <div id="class-targets-status" class="status-line"></div>
+        </div>
+
         <div class="small-note">
           Technical metrics and indicators are computed for the selected instrument using Yahoo Finance data only.
         </div>
@@ -512,7 +572,7 @@
         </div>
 
         <div class="small-note">
-          All construction outputs below are computed only for the asset class selected in the top filter.
+          Construction outputs are computed for the instruments currently shown by the top Asset Class filter. For cross-asset allocation constraints, choose “All Groups”.
         </div>
 
         <div class="kpi-grid">
@@ -729,6 +789,9 @@
   <script>
     const sparkCharts = {};
     let allRows = [];
+    let classTargetsPct = {}; // group -> percent
+    let classTargetsInitialized = false;
+
     let allGroups = [];
 
     function fmtNumber(x, digits = 2) {
@@ -1024,6 +1087,193 @@
       if (total > 0) {
         Object.keys(out).forEach(k => out[k] = out[k] / total);
       }
+
+    function cssEscape(s) {
+      try {
+        return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+      } catch (e) {
+        return String(s);
+      }
+    }
+
+    function escapeAttr(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    function deriveClassTargetsFromCurrentWeights(rows) {
+      const raw = {};
+      rows.forEach(r => {
+        const g = r.group || "Unknown";
+        const w = Number(r.current_weight) || 0;
+        raw[g] = (raw[g] || 0) + Math.max(w, 0);
+      });
+      const total = Object.values(raw).reduce((a, b) => a + b, 0);
+      if (total <= 0) return raw;
+      Object.keys(raw).forEach(g => raw[g] = (raw[g] / total) * 100);
+      return raw;
+    }
+
+    function normalizeTargetsPct(obj) {
+      const keys = Object.keys(obj || {});
+      let total = keys.reduce((a, k) => a + Math.max(Number(obj[k]) || 0, 0), 0);
+      if (total <= 0) return obj;
+      keys.forEach(k => obj[k] = (Math.max(Number(obj[k]) || 0, 0) / total) * 100);
+      return obj;
+    }
+
+    function renderClassTargetControls() {
+      const rows = filteredRows();
+      const container = document.getElementById("class-targets-container");
+      const totalEl = document.getElementById("class-targets-total");
+      const statusEl = document.getElementById("class-targets-status");
+      if (!container || !totalEl || !statusEl) return;
+
+      const groups = [...new Set(rows.map(r => r.group || "Unknown"))].sort();
+      if (!classTargetsInitialized) {
+        classTargetsPct = deriveClassTargetsFromCurrentWeights(rows);
+        classTargetsInitialized = true;
+      } else {
+        // Ensure all groups exist in state
+        groups.forEach(g => { if (classTargetsPct[g] === undefined) classTargetsPct[g] = 0; });
+      }
+
+      container.innerHTML = "";
+      groups.forEach(g => {
+        const pct = Number(classTargetsPct[g]) || 0;
+
+        const rowDiv = document.createElement("div");
+        rowDiv.className = "target-row";
+        rowDiv.innerHTML = `
+          <div class="tlabel">${escapeHtml(g)}</div>
+          <input type="range" min="0" max="100" step="0.5" value="${pct.toFixed(1)}" data-group="${escapeAttr(g)}">
+          <div class="tval" id="tval-${normalizeChartId(g)}">${pct.toFixed(1)}%</div>
+          <input type="number" min="0" max="100" step="0.5" value="${pct.toFixed(1)}" data-group="${escapeAttr(g)}">
+        `;
+        container.appendChild(rowDiv);
+      });
+
+      function updateTotalUI() {
+        const groupsNow = groups;
+        const total = groupsNow.reduce((a, g) => a + (Number(classTargetsPct[g]) || 0), 0);
+        totalEl.textContent = `Total: ${total.toFixed(1)}%`;
+        if (Math.abs(total - 100) > 0.75) {
+          statusEl.textContent = "Note: Total is not 100%. Use “Normalize to 100%” or “Apply” (which will renormalize).";
+        } else {
+          statusEl.textContent = "";
+        }
+      }
+
+      container.querySelectorAll('input[type="range"]').forEach(sl => {
+        sl.addEventListener("input", function () {
+          const g = this.getAttribute("data-group");
+          const v = Number(this.value) || 0;
+          classTargetsPct[g] = v;
+          const vEl = document.getElementById(`tval-${normalizeChartId(g)}`);
+          if (vEl) vEl.textContent = `${v.toFixed(1)}%`;
+          // sync number input
+          const num = container.querySelector(`input[type="number"][data-group="${cssEscape(g)}"]`);
+          if (num) num.value = v.toFixed(1);
+          updateTotalUI();
+        });
+      });
+
+      container.querySelectorAll('input[type="number"]').forEach(num => {
+        num.addEventListener("input", function () {
+          const g = this.getAttribute("data-group");
+          let v = Number(this.value);
+          if (!isFinite(v)) v = 0;
+          v = Math.max(0, Math.min(100, v));
+          classTargetsPct[g] = v;
+          const vEl = document.getElementById(`tval-${normalizeChartId(g)}`);
+          if (vEl) vEl.textContent = `${v.toFixed(1)}%`;
+          const sl = container.querySelector(`input[type="range"][data-group="${cssEscape(g)}"]`);
+          if (sl) sl.value = v.toFixed(1);
+          updateTotalUI();
+        });
+      });
+
+      updateTotalUI();
+    }
+
+    function classTargetsToFractions(rows) {
+      const groups = [...new Set(rows.map(r => r.group || "Unknown"))];
+      const obj = {};
+      groups.forEach(g => { obj[g] = Math.max(Number(classTargetsPct[g]) || 0, 0); });
+      const total = Object.values(obj).reduce((a, b) => a + b, 0);
+      if (total <= 0) return null;
+      Object.keys(obj).forEach(g => obj[g] = obj[g] / total);
+      return obj;
+    }
+
+    function applyClassTargetsProportionally() {
+      const rows = filteredRows();
+      const statusEl = document.getElementById("class-targets-status");
+      if (rows.length === 0) return;
+
+      // Ensure targets exist
+      const groups = [...new Set(rows.map(r => r.group || "Unknown"))];
+      groups.forEach(g => { if (classTargetsPct[g] === undefined) classTargetsPct[g] = 0; });
+
+      // Build group->items
+      const groupItems = {};
+      rows.forEach(r => {
+        const g = r.group || "Unknown";
+        if (!groupItems[g]) groupItems[g] = [];
+        groupItems[g].push(r);
+      });
+
+      // Apply within each group
+      groups.forEach(g => {
+        const tgt = Math.max(Number(classTargetsPct[g]) || 0, 0);
+        const items = groupItems[g] || [];
+        if (items.length === 0) return;
+
+        let base = items.map(it => Math.max(Number(it.current_weight) || 0, 0));
+        let baseSum = base.reduce((a, b) => a + b, 0);
+        if (baseSum <= 0) {
+          base = items.map(() => 1);
+          baseSum = items.length;
+        }
+
+        items.forEach((it, idx) => {
+          it.current_weight = (tgt * base[idx]) / baseSum;
+        });
+      });
+
+      // Renormalize to 100% within the current universe
+      const totalW = rows.reduce((a, r) => a + Math.max(Number(r.current_weight) || 0, 0), 0);
+      if (totalW > 0) {
+        rows.forEach(r => r.current_weight = (Math.max(Number(r.current_weight) || 0, 0) / totalW) * 100);
+      }
+
+      buildRows(currentGroupFilter());
+      renderClassTargetControls();
+
+      if (statusEl) statusEl.textContent = "Applied class targets to instruments proportionally (weights renormalized to 100%).";
+    }
+
+    function attachClassTargetButtons() {
+      const btnApply = document.getElementById("apply-class-targets-btn");
+      const btnReset = document.getElementById("class-targets-reset-btn");
+      const btnNorm = document.getElementById("class-targets-normalize-btn");
+      if (btnApply) btnApply.addEventListener("click", applyClassTargetsProportionally);
+
+      if (btnReset) btnReset.addEventListener("click", function () {
+        classTargetsPct = deriveClassTargetsFromCurrentWeights(filteredRows());
+        classTargetsInitialized = true;
+        renderClassTargetControls();
+        const statusEl = document.getElementById("class-targets-status");
+        if (statusEl) statusEl.textContent = "Class targets reset from current instrument weights.";
+      });
+
+      if (btnNorm) btnNorm.addEventListener("click", function () {
+        classTargetsPct = normalizeTargetsPct(classTargetsPct);
+        classTargetsInitialized = true;
+        renderClassTargetControls();
+        const statusEl = document.getElementById("class-targets-status");
+        if (statusEl) statusEl.textContent = "Class targets normalized to 100%.";
+      });
+    }
       return out;
     }
 
@@ -1042,7 +1292,7 @@
         target_volatility: (parseFloat(document.getElementById("target-volatility").value) || 15) / 100,
         target_return: (parseFloat(document.getElementById("target-return").value) || 12) / 100,
         user_weights: userWeights,
-        group_targets: computeGroupTargets(rows),
+        group_targets: (classTargetsToFractions(rows) || computeGroupTargets(rows)),
         min_weight: minW,
         max_weight: maxW
       };
@@ -1794,6 +2044,7 @@ async function runOptimization() {
 
     (async function init() {
       setupTabs();
+      attachClassTargetButtons();
       await loadUniverse();
       await loadSnapshot(false);
     })();
