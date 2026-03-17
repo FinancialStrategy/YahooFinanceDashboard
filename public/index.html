@@ -479,39 +479,7 @@
 
 
         <div class="section-block" style="margin-top:10px;">
-          <div class="section-title">Asset Class Prior Targets (Hard Constraints)
-<!-- Feasibility Checker (pre-run validation) -->
-<div class="card" style="margin-top:12px;">
-  <div class="card-header">
-    <div class="card-title">Feasibility Checker</div>
-    <div class="card-subtitle">Validate class targets against instrument-level bounds before running optimization.</div>
-  </div>
-  <div class="card-body">
-    <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap;">
-      <button id="checkFeasibility" class="btn btn-secondary">Check Feasibility</button>
-      <div id="feasSummary" class="muted" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></div>
-    </div>
-
-    <div style="margin-top:10px; overflow:auto;">
-      <table class="table" id="feasTable" style="min-width:780px; display:none;">
-        <thead>
-          <tr>
-            <th>Asset Class</th>
-            <th>Target %</th>
-            <th>Min Feasible %</th>
-            <th>Max Feasible %</th>
-            <th>Status</th>
-            <th>Notes</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <div id="feasNotes" class="muted" style="margin-top:8px; line-height:1.35;"></div>
-  </div>
-</div>
-</div>
+          <div class="section-title">Asset Class Prior Targets (Hard Constraints)</div>
           <div class="small-note">
             Define asset-class allocation targets. Click “Apply to instruments proportionally” to distribute targets across instruments.
             These targets are sent as hard constraints to the optimizer.
@@ -527,7 +495,39 @@
           </div>
 
           <div id="class-targets-status" class="status-line"></div>
-        </div>
+        
+<!-- Feasibility Checker (pre-run validation) -->
+<div class="section-block" style="margin-top:12px;">
+  <div class="section-title">Feasibility Checker</div>
+  <div class="small-note">
+    Validate class targets against instrument-level bounds before running optimization.
+    A class target is feasible iff <b>Σ min_i ≤ target ≤ Σ max_i</b> within that class (for selected instruments).
+  </div>
+
+  <div class="toolbar" style="margin-top:10px;">
+    <div class="small-note" id="feasSummary" style="margin-right:auto;">—</div>
+    <button id="checkFeasibilityBtn" type="button">Check Feasibility</button>
+  </div>
+
+  <div style="margin-top:10px; overflow:auto;">
+    <table class="table" id="feasTable" style="min-width:820px; display:none;">
+      <thead>
+        <tr>
+          <th>Asset Class</th>
+          <th>Target %</th>
+          <th>Min Feasible %</th>
+          <th>Max Feasible %</th>
+          <th>Status</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="feasNotes" class="small-note" style="margin-top:10px; line-height:1.4;"></div>
+</div>
+</div>
 
         <div class="small-note">
           Technical metrics and indicators are computed for the selected instrument using Yahoo Finance data only.
@@ -2084,138 +2084,173 @@ async function runOptimization() {
 
 <script>
 /* ============================================================
-   Feasibility Checker (client-side)
-   - Checks: class targets sum ~ 100%
-   - For each class: target must lie within [sum(min_i), sum(max_i)] over selected instruments in that class
-   - Uses current UI bounds if present; defaults to [0, 100] per instrument
+   Feasibility Checker (client-side, non-invasive)
+   - Reads class targets from the existing class-targets UI
+   - Reads instrument-level bounds from existing inputs when present
+   - Does NOT modify weights; only validates feasibility
    ============================================================ */
 
-function _pct01(x){ if(!isFinite(x)) return "—"; return (100*x).toFixed(2) + "%"; }
-function _clamp01(x){ return Math.min(1, Math.max(0, x)); }
+(function () {
+  function pct01(x) { return (isFinite(x) ? (100 * x).toFixed(2) + "%" : "—"); }
+  function clamp01(x) { return Math.min(1, Math.max(0, x)); }
 
-function _getSelectedUniverse() {
-  // Preferred: existing helper
-  if (typeof window.getSelectedInstruments === "function") return window.getSelectedInstruments();
-
-  // Fallback: checkbox rows
-  const rows = Array.from(document.querySelectorAll('[data-instrument-row="1"]'));
-  return rows
-    .filter(r => (r.querySelector('input[type="checkbox"]')?.checked))
-    .map(r => ({
-      symbol: (r.getAttribute("data-symbol") || "").trim(),
-      assetClass: (r.getAttribute("data-asset-class") || "").trim()
-    }))
-    .filter(x => x.symbol);
-}
-
-function _getInstrumentBounds(symbol) {
-  const minEl = document.getElementById(`min_${symbol}`) || document.querySelector(`[data-min-for="${symbol}"]`);
-  const maxEl = document.getElementById(`max_${symbol}`) || document.querySelector(`[data-max-for="${symbol}"]`);
-
-  let minV = 0.0, maxV = 1.0;
-  if (minEl && minEl.value !== "") minV = parseFloat(minEl.value)/100.0;
-  if (maxEl && maxEl.value !== "") maxV = parseFloat(maxEl.value)/100.0;
-
-  minV = _clamp01(isFinite(minV) ? minV : 0);
-  maxV = _clamp01(isFinite(maxV) ? maxV : 1);
-  if (maxV < minV) { const t=maxV; maxV=minV; minV=t; }
-  return {min:minV, max:maxV};
-}
-
-function _getClassTargets() {
-  // Preferred: existing helper
-  if (typeof window.getClassTargetMap === "function") return window.getClassTargetMap();
-
-  const targets = {};
-  const sliders = Array.from(document.querySelectorAll('[data-class-target="1"]'));
-  sliders.forEach(sl => {
-    const key = sl.getAttribute("data-class-key") || sl.id.replace(/^classTarget_/, "");
-    const v = parseFloat(sl.value);
-    if (isFinite(v)) targets[key] = v/100.0;
-  });
-  return targets;
-}
-
-function computeFeasibility() {
-  const selected = _getSelectedUniverse();
-  const targets = _getClassTargets();
-
-  const summaryEl = document.getElementById("feasSummary");
-  const table = document.getElementById("feasTable");
-  const tbody = table.querySelector("tbody");
-  const notesEl = document.getElementById("feasNotes");
-
-  tbody.innerHTML = "";
-  notesEl.textContent = "";
-  table.style.display = "none";
-
-  if (!selected || selected.length < 2) {
-    summaryEl.textContent = "Select at least 2 instruments to validate constraints.";
-    return;
+  // Selected instruments should already be available via existing page logic.
+  // We try a few safe ways to retrieve them without breaking the page.
+  function getSelectedRows() {
+    if (typeof window.filteredRows === "function") {
+      // Many builds keep the "universe" as filteredRows() (already selected list)
+      try {
+        const r = window.filteredRows();
+        if (Array.isArray(r)) return r;
+      } catch (_) {}
+    }
+    if (typeof window.getSelectedInstruments === "function") {
+      try {
+        const r = window.getSelectedInstruments();
+        if (Array.isArray(r)) return r;
+      } catch (_) {}
+    }
+    // Fallback: if the page has a universe table with checkboxes
+    const rows = Array.from(document.querySelectorAll('tr[data-symbol]'));
+    const out = [];
+    rows.forEach(tr => {
+      const cb = tr.querySelector('input[type="checkbox"]');
+      if (cb && cb.checked) {
+        out.push({
+          symbol: (tr.getAttribute("data-symbol") || "").trim(),
+          asset_class: (tr.getAttribute("data-asset-class") || "").trim()
+        });
+      }
+    });
+    return out;
   }
 
-  // Group selected by class
-  const byClass = {};
-  selected.forEach(x => {
-    const cls = x.assetClass || "Unclassified";
-    if (!byClass[cls]) byClass[cls] = [];
-    byClass[cls].push(x.symbol);
-  });
+  function getBounds(symbol) {
+    // Preferred convention: min_{symbol}, max_{symbol} in percent inputs
+    const minEl = document.getElementById(`min_${symbol}`) || document.querySelector(`[data-min-for="${symbol}"]`);
+    const maxEl = document.getElementById(`max_${symbol}`) || document.querySelector(`[data-max-for="${symbol}"]`);
 
-  const targetSum = Object.values(targets).reduce((a,b)=>a+(isFinite(b)?b:0), 0);
-  const sumOK = Math.abs(targetSum - 1.0) <= 0.005;
+    let mn = 0.0, mx = 1.0;
+    if (minEl && minEl.value !== "") mn = parseFloat(minEl.value) / 100.0;
+    if (maxEl && maxEl.value !== "") mx = parseFloat(maxEl.value) / 100.0;
 
-  let allOK = sumOK;
+    mn = clamp01(isFinite(mn) ? mn : 0);
+    mx = clamp01(isFinite(mx) ? mx : 1);
+    if (mx < mn) { const t = mx; mx = mn; mn = t; }
+    return {min: mn, max: mx};
+  }
 
-  Object.keys(byClass).sort().forEach(cls => {
-    const syms = byClass[cls];
-
-    let minC = 0, maxC = 0;
-    syms.forEach(s => {
-      const b = _getInstrumentBounds(s);
-      minC += b.min;
-      maxC += b.max;
-    });
-
-    const tgt = (targets[cls] !== undefined) ? targets[cls] : null;
-
-    let status = "OK";
-    let note = "";
-    if (tgt === null) {
-      status = "WARN";
-      note = "No target set for this class.";
-    } else if (tgt < minC - 1e-6 || tgt > maxC + 1e-6) {
-      status = "FAIL";
-      note = "Target outside feasible range from min/max bounds.";
-      allOK = false;
+  function getClassTargetsMap() {
+    if (typeof window.getClassTargetMap === "function") {
+      try { return window.getClassTargetMap(); } catch (_) {}
     }
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${cls}</td>
-      <td>${tgt===null ? "—" : _pct01(tgt)}</td>
-      <td>${_pct01(minC)}</td>
-      <td>${_pct01(maxC)}</td>
-      <td><span class="badge ${status==="OK"?"badge-success":status==="WARN"?"badge-warn":"badge-danger"}">${status}</span></td>
-      <td>${note}</td>
-    `;
-    tbody.appendChild(tr);
+    // The app renders class target sliders into #class-targets-container.
+    // We read inputs tagged with data attributes (added by our template).
+    const targets = {};
+    const inputs = Array.from(document.querySelectorAll('#class-targets-container input[type="range"][data-class-target="1"], #class-targets-container input[type="number"][data-class-target="1"]'));
+    inputs.forEach(inp => {
+      const key = inp.getAttribute("data-class-key") || "";
+      const v = parseFloat(inp.value);
+      if (key && isFinite(v)) targets[key] = v / 100.0;
+    });
+    return targets;
+  }
+
+  function renderResult(rows, targetSum, sumOK, allOK) {
+    const summaryEl = document.getElementById("feasSummary");
+    const table = document.getElementById("feasTable");
+    const tbody = table ? table.querySelector("tbody") : null;
+    const notesEl = document.getElementById("feasNotes");
+
+    if (summaryEl) summaryEl.textContent = allOK ? "Feasible ✅" : "Not feasible ❌";
+    if (tbody) tbody.innerHTML = "";
+    if (table) table.style.display = "";
+
+    if (tbody) {
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        const badgeClass = r.status === "OK" ? "badge-success" : (r.status === "WARN" ? "badge-warn" : "badge-danger");
+        tr.innerHTML = `
+          <td>${r.cls}</td>
+          <td>${r.tgt === null ? "—" : pct01(r.tgt)}</td>
+          <td>${pct01(r.minC)}</td>
+          <td>${pct01(r.maxC)}</td>
+          <td><span class="badge ${badgeClass}">${r.status}</span></td>
+          <td>${r.note}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    if (notesEl) {
+      const lines = [];
+      lines.push(sumOK ? `• Target sum OK (${pct01(targetSum)}).` : `• Target sum is ${pct01(targetSum)} (should be 100%). Use “Normalize to 100%”.`);
+      lines.push(allOK ? "• Constraints look feasible. You can run optimization." : "• Constraints are NOT feasible. Adjust targets and/or bounds.");
+      notesEl.innerHTML = lines.join("<br/>");
+    }
+  }
+
+  function computeFeasibilityV2() {
+    const selected = getSelectedRows();
+    const targets = getClassTargetsMap();
+
+    const table = document.getElementById("feasTable");
+    if (table) table.style.display = "none";
+
+    if (!selected || selected.length < 2) {
+      const s = document.getElementById("feasSummary");
+      if (s) s.textContent = "Select at least 2 instruments to validate constraints.";
+      return;
+    }
+
+    // Group by class
+    const byClass = {};
+    selected.forEach(x => {
+      const cls = (x.asset_class || x.assetClass || "Unclassified").trim() || "Unclassified";
+      if (!byClass[cls]) byClass[cls] = [];
+      byClass[cls].push((x.symbol || x.ticker || "").trim());
+    });
+
+    const targetSum = Object.values(targets).reduce((a, b) => a + (isFinite(b) ? b : 0), 0);
+    const sumOK = Math.abs(targetSum - 1.0) <= 0.005;
+
+    let allOK = sumOK;
+    const rows = [];
+
+    Object.keys(byClass).sort().forEach(cls => {
+      const syms = byClass[cls].filter(Boolean);
+      let minC = 0, maxC = 0;
+
+      syms.forEach(sym => {
+        const b = getBounds(sym);
+        minC += b.min;
+        maxC += b.max;
+      });
+
+      const tgt = (targets[cls] !== undefined) ? targets[cls] : null;
+
+      let status = "OK", note = "";
+      if (tgt === null) {
+        status = "WARN";
+        note = "No target set for this class.";
+      } else if (tgt < minC - 1e-6 || tgt > maxC + 1e-6) {
+        status = "FAIL";
+        note = "Target outside feasible range from min/max bounds.";
+        allOK = false;
+      }
+
+      rows.push({cls, tgt, minC, maxC, status, note});
+    });
+
+    renderResult(rows, targetSum, sumOK, allOK);
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const btn = document.getElementById("checkFeasibilityBtn");
+    if (btn) btn.addEventListener("click", (e) => { e.preventDefault(); computeFeasibilityV2(); });
   });
-
-  const lines = [];
-  lines.push(sumOK ? `• Target sum OK (${_pct01(targetSum)}).` : `• Target sum is ${_pct01(targetSum)} (should be 100%). Use Normalize to 100%.`);
-  lines.push(`• Selected instruments: ${selected.length}.`);
-  lines.push(allOK ? "• Constraints look feasible. You can run optimization." : "• Constraints are NOT feasible. Adjust targets and/or bounds.");
-
-  summaryEl.textContent = allOK ? "Feasible ✅" : "Not feasible ❌";
-  notesEl.innerHTML = lines.join("<br/>");
-  table.style.display = "";
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("checkFeasibility");
-  if (btn) btn.addEventListener("click", (e)=>{ e.preventDefault(); computeFeasibility(); });
-});
+})();
 </script>
 
 </body>
