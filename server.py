@@ -463,21 +463,159 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "hrp":
-        hrp = HRPOpt(rets)
-        weights = hrp.optimize()
-        perf = hrp.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        # Hierarchical Risk Parity
+        # If group targets are provided, enforce them as hard constraints by:
+        # 1) Running HRP within each asset class on the subset returns
+        # 2) Scaling intra-class weights by the class target
+        if group_targets:
+            combined = {}
+            for g, tgt in group_targets.items():
+                tgt = float(tgt)
+                if tgt <= 0:
+                    continue
+                subset = [s for s in symbols if group_map.get(s, "Unknown") == g]
+                if len(subset) == 0:
+                    continue
+                if len(subset) == 1:
+                    combined[subset[0]] = combined.get(subset[0], 0.0) + tgt
+                else:
+                    try:
+                        hrp_sub = HRPOpt(rets[subset])
+                        w_sub = hrp_sub.optimize()  # sums to 1 within the group
+                        for s, wv in w_sub.items():
+                            combined[s] = combined.get(s, 0.0) + float(wv) * tgt
+                    except Exception:
+                        # fallback: equal-weight within group
+                        eq = tgt / float(len(subset))
+                        for s in subset:
+                            combined[s] = combined.get(s, 0.0) + eq
+
+            # Ensure weights sum to 1 and fill missing as 0
+            total = sum(max(v, 0.0) for v in combined.values())
+            if total <= 0:
+                raise RuntimeError("Asset-class targets sum to zero after cleaning. Increase at least one class target.")
+            combined = {k: max(v, 0.0) / total for k, v in combined.items()}
+            weights = {s: float(combined.get(s, 0.0)) for s in symbols}
+        else:
+            hrp = HRPOpt(rets)
+            weights = hrp.optimize()
+
+        # Performance proxy from mu/cov (consistent across strategies)
+        wvec = np.array([weights.get(s, 0.0) for s in symbols], dtype=float)
+        port_ret = float(mu.values @ wvec)
+        port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
+        sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
+        perf = (port_ret, port_vol, sharpe)
 
     elif strategy == "cla_max_sharpe":
-        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        cla.max_sharpe()
-        weights = cla.clean_weights()
-        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        # Critical Line Algorithm (Max Sharpe)
+        if group_targets:
+            combined = {}
+            for g, tgt in group_targets.items():
+                tgt = float(tgt)
+                if tgt <= 0:
+                    continue
+                subset = [s for s in symbols if group_map.get(s, "Unknown") == g]
+                if len(subset) == 0:
+                    continue
+                if len(subset) == 1:
+                    combined[subset[0]] = combined.get(subset[0], 0.0) + tgt
+                else:
+                    mu_sub = mu[subset]
+                    cov_sub = cov_matrix.loc[subset, subset]
+                    try:
+                        cla_sub = CLA(mu_sub, cov_sub, weight_bounds=(float(min_weight), float(max_weight)))
+                        cla_sub.max_sharpe()
+                        w_sub = cla_sub.clean_weights()
+                        # normalize within group defensively
+                        ssum = sum(max(v, 0.0) for v in w_sub.values())
+                        if ssum <= 0:
+                            eq = 1.0 / float(len(subset))
+                            w_sub = {s: eq for s in subset}
+                        else:
+                            w_sub = {k: max(v, 0.0)/ssum for k, v in w_sub.items()}
+                        for s, wv in w_sub.items():
+                            combined[s] = combined.get(s, 0.0) + float(wv) * tgt
+                    except Exception:
+                        eq = tgt / float(len(subset))
+                        for s in subset:
+                            combined[s] = combined.get(s, 0.0) + eq
+
+            total = sum(max(v, 0.0) for v in combined.values())
+            if total <= 0:
+                raise RuntimeError("Asset-class targets sum to zero after cleaning. Increase at least one class target.")
+            combined = {k: max(v, 0.0) / total for k, v in combined.items()}
+            weights = {s: float(combined.get(s, 0.0)) for s in symbols}
+
+            # feasibility check vs global bounds
+            if any((w > max_weight + 1e-6) for w in weights.values()):
+                raise RuntimeError("Class targets are incompatible with the Max Weight bound for this strategy. Increase Max Weight or adjust class targets.")
+            if min_weight > 0 and any((0 < w < min_weight - 1e-6) for w in weights.values()):
+                raise RuntimeError("Class targets are incompatible with the Min Weight bound for this strategy. Reduce Min Weight or adjust class targets.")
+            wvec = np.array([weights.get(s, 0.0) for s in symbols], dtype=float)
+            port_ret = float(mu.values @ wvec)
+            port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
+            sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
+            perf = (port_ret, port_vol, sharpe)
+        else:
+            cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            cla.max_sharpe()
+            weights = cla.clean_weights()
+            perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "cla_min_volatility":
-        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        cla.min_volatility()
-        weights = cla.clean_weights()
-        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        # Critical Line Algorithm (Min Volatility)
+        if group_targets:
+            combined = {}
+            for g, tgt in group_targets.items():
+                tgt = float(tgt)
+                if tgt <= 0:
+                    continue
+                subset = [s for s in symbols if group_map.get(s, "Unknown") == g]
+                if len(subset) == 0:
+                    continue
+                if len(subset) == 1:
+                    combined[subset[0]] = combined.get(subset[0], 0.0) + tgt
+                else:
+                    mu_sub = mu[subset]
+                    cov_sub = cov_matrix.loc[subset, subset]
+                    try:
+                        cla_sub = CLA(mu_sub, cov_sub, weight_bounds=(float(min_weight), float(max_weight)))
+                        cla_sub.min_volatility()
+                        w_sub = cla_sub.clean_weights()
+                        ssum = sum(max(v, 0.0) for v in w_sub.values())
+                        if ssum <= 0:
+                            eq = 1.0 / float(len(subset))
+                            w_sub = {s: eq for s in subset}
+                        else:
+                            w_sub = {k: max(v, 0.0)/ssum for k, v in w_sub.items()}
+                        for s, wv in w_sub.items():
+                            combined[s] = combined.get(s, 0.0) + float(wv) * tgt
+                    except Exception:
+                        eq = tgt / float(len(subset))
+                        for s in subset:
+                            combined[s] = combined.get(s, 0.0) + eq
+
+            total = sum(max(v, 0.0) for v in combined.values())
+            if total <= 0:
+                raise RuntimeError("Asset-class targets sum to zero after cleaning. Increase at least one class target.")
+            combined = {k: max(v, 0.0) / total for k, v in combined.items()}
+            weights = {s: float(combined.get(s, 0.0)) for s in symbols}
+
+            if any((w > max_weight + 1e-6) for w in weights.values()):
+                raise RuntimeError("Class targets are incompatible with the Max Weight bound for this strategy. Increase Max Weight or adjust class targets.")
+            if min_weight > 0 and any((0 < w < min_weight - 1e-6) for w in weights.values()):
+                raise RuntimeError("Class targets are incompatible with the Min Weight bound for this strategy. Reduce Min Weight or adjust class targets.")
+            wvec = np.array([weights.get(s, 0.0) for s in symbols], dtype=float)
+            port_ret = float(mu.values @ wvec)
+            port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
+            sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
+            perf = (port_ret, port_vol, sharpe)
+        else:
+            cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            cla.min_volatility()
+            weights = cla.clean_weights()
+            perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
