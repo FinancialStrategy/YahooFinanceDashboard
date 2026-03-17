@@ -12,6 +12,11 @@ from scipy.stats import norm
 from hmmlearn.hmm import GaussianHMM
 from sklearn.linear_model import LinearRegression
 
+try:
+    import quantstats as qs
+except Exception:
+    qs = None
+
 from pypfopt import EfficientFrontier, expected_returns, risk_models
 from pypfopt.hierarchical_portfolio import HRPOpt
 from pypfopt.cla import CLA
@@ -21,6 +26,8 @@ warnings.filterwarnings("ignore")
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 INDEX_FILE = PUBLIC_DIR / "index.html"
+if not INDEX_FILE.exists():
+    INDEX_FILE = BASE_DIR / "index.html"
 UNIVERSE_FILE = BASE_DIR / "universe.json"
 
 app = FastAPI(title="Institutional Quant Platform")
@@ -183,7 +190,7 @@ def build_snapshot():
 
     df = yf.download(
         tickers=symbols,
-        period="8mo",
+        period="2y",
         interval="1d",
         auto_adjust=True,
         progress=False,
@@ -225,9 +232,13 @@ def build_snapshot():
                 "price": last_price,
                 "prev_close": prev_close,
                 "daily_change_pct": daily_change_pct,
+                "ret_1d_pct": daily_change_pct,
+                "ret_1w_pct": safe_pct_return(close, 5),
                 "ret_1m_pct": safe_pct_return(close, 21),
                 "ret_3m_pct": safe_pct_return(close, 63),
                 "ytd_pct": ytd_return(close),
+                "ret_6m_pct": safe_pct_return(close, 126),
+                "ret_1y_pct": safe_pct_return(close, 252),
                 "vol_30d_pct": annualized_volatility(close, 30),
                 "avg_volume_20d": avg_volume(volume, 20),
                 "sparkline": spark
@@ -691,6 +702,176 @@ def compute_lightweight_forecast(symbol, period="3y", lookback=30, forecast_hori
             for dt, val in zip(future_dates, forecast_prices)
         ]
     }
+
+
+
+# ============================
+# Technical Analysis (single instrument)
+# - Uses deterministic Yahoo Finance data only
+# - Metrics are computed on daily returns; charts on price and derived series
+# ============================
+
+def _ema(series: pd.Series, span: int):
+    return series.ewm(span=span, adjust=False).mean()
+
+def _rsi(series: pd.Series, period: int = 14):
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    # Wilder smoothing via EMA with alpha=1/period
+    roll_up = up.ewm(alpha=1/period, adjust=False).mean()
+    roll_down = down.ewm(alpha=1/period, adjust=False).mean()
+    rs = roll_up / roll_down.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.replace([np.inf, -np.inf], np.nan)
+
+def _safe_float(x):
+    try:
+        if x is None:
+            return None
+        v = float(x)
+        if np.isfinite(v):
+            return v
+        return None
+    except Exception:
+        return None
+
+def _download_close(symbol: str, period: str = "2y", interval: str = "1d"):
+    df = yf.download(
+        tickers=symbol,
+        period=period,
+        interval=interval,
+        auto_adjust=True,
+        progress=False,
+        threads=False
+    )
+    if df is None or df.empty:
+        raise RuntimeError("No market data returned for the selected instrument")
+    if isinstance(df.columns, pd.MultiIndex):
+        try:
+            close = df["Close"][symbol].dropna()
+        except Exception:
+            close = df.xs(symbol, axis=1, level=0)["Close"].dropna()
+    else:
+        close = df["Close"].dropna()
+
+    if len(close) < 60:
+        raise RuntimeError("Not enough price history for technical analysis")
+    close = close.sort_index().ffill().dropna()
+    return close
+
+def _quant_metrics(returns: pd.Series):
+    # Returns are daily simple returns (not log returns)
+    if qs is None:
+        # Fallback: compute essentials without naming dependencies in messages
+        rf_daily = RISK_FREE_RATE / TRADING_DAYS
+        excess = returns - rf_daily
+        cagr = (1 + returns).prod() ** (TRADING_DAYS / len(returns)) - 1
+        vol = returns.std() * np.sqrt(TRADING_DAYS)
+        sharpe = (excess.mean() / excess.std()) * np.sqrt(TRADING_DAYS) if excess.std() and excess.std() == excess.std() else None
+        downside = returns[returns < 0]
+        sortino = (excess.mean() * TRADING_DAYS) / (downside.std() * np.sqrt(TRADING_DAYS)) if len(downside) > 5 and downside.std() else None
+        cum = (1 + returns).cumprod()
+        dd = cum / cum.cummax() - 1
+        mdd = dd.min()
+        calmar = (cagr / abs(mdd)) if mdd and mdd < 0 else None
+        return {
+            "cagr": _safe_float(cagr),
+            "volatility": _safe_float(vol),
+            "sharpe": _safe_float(sharpe),
+            "sortino": _safe_float(sortino),
+            "max_drawdown": _safe_float(mdd),
+            "calmar": _safe_float(calmar),
+            "skew": _safe_float(returns.skew()),
+            "kurtosis": _safe_float(returns.kurtosis()),
+            "win_rate": _safe_float((returns > 0).mean())
+        }
+
+    # Primary path: metrics engine
+    return {
+        "cagr": _safe_float(qs.stats.cagr(returns)),
+        "volatility": _safe_float(qs.stats.volatility(returns)),
+        "sharpe": _safe_float(qs.stats.sharpe(returns, rf=RISK_FREE_RATE)),
+        "sortino": _safe_float(qs.stats.sortino(returns, rf=RISK_FREE_RATE)),
+        "max_drawdown": _safe_float(qs.stats.max_drawdown(returns)),
+        "calmar": _safe_float(qs.stats.calmar(returns)),
+        "skew": _safe_float(qs.stats.skew(returns)),
+        "kurtosis": _safe_float(qs.stats.kurtosis(returns)),
+        "win_rate": _safe_float(qs.stats.win_rate(returns))
+    }
+
+def _monthly_heatmap(returns: pd.Series):
+    m = (1 + returns).resample("M").prod() - 1
+    if m.empty:
+        return {"years": [], "months": [], "z": []}
+    df = m.to_frame("ret")
+    df["year"] = df.index.year
+    df["month"] = df.index.month
+    pivot = df.pivot_table(index="year", columns="month", values="ret", aggfunc="mean").sort_index()
+    years = [int(y) for y in pivot.index.tolist()]
+    months = [int(c) for c in pivot.columns.tolist()]
+    z = pivot.fillna(0.0).values.tolist()
+    return {"years": years, "months": months, "z": z}
+
+def build_technical_analysis(symbol: str, period: str = "2y"):
+    close = _download_close(symbol, period=period, interval="1d")
+    returns = close.pct_change().dropna()
+
+    metrics = _quant_metrics(returns)
+
+    sma20 = close.rolling(20).mean()
+    sma50 = close.rolling(50).mean()
+    rsi14 = _rsi(close, 14)
+
+    macd = _ema(close, 12) - _ema(close, 26)
+    macd_signal = _ema(macd, 9)
+    macd_hist = macd - macd_signal
+
+    rolling_vol = returns.rolling(63).std() * np.sqrt(TRADING_DAYS)
+    cumulative, drawdown = compute_drawdown(returns)
+
+    heatmap = _monthly_heatmap(returns)
+
+    def _rec(s):
+        return [{"date": pd.to_datetime(i).strftime("%Y-%m-%d"), "value": float(v)} for i, v in s.dropna().items()]
+
+    payload = {
+        "symbol": symbol,
+        "latest_price": float(close.iloc[-1]),
+        "returns_count": int(len(returns)),
+        "metrics": metrics,
+        "price": _rec(close),
+        "sma20": _rec(sma20),
+        "sma50": _rec(sma50),
+        "rsi14": _rec(rsi14),
+        "macd": _rec(macd),
+        "macd_signal": _rec(macd_signal),
+        "macd_hist": _rec(macd_hist),
+        "drawdown": _rec(drawdown),
+        "rolling_vol": _rec(rolling_vol),
+        "monthly_heatmap": heatmap
+    }
+    return payload
+
+
+@app.post("/api/technical")
+def api_technical(payload: dict = Body(...)):
+    try:
+        symbol = payload.get("symbol")
+        period = payload.get("period", "2y")
+
+        if not symbol:
+            raise RuntimeError("Symbol is required for technical analysis")
+
+        # Keep allowed periods tight
+        allowed = {"6mo", "1y", "2y", "5y", "10y", "max"}
+        if isinstance(period, str) and period not in allowed:
+            period = "2y"
+
+        result = build_technical_analysis(symbol=symbol, period=period)
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/")
