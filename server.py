@@ -13,11 +13,18 @@ from hmmlearn.hmm import GaussianHMM
 from sklearn.linear_model import LinearRegression
 
 try:
+    import cvxpy as cp
+except Exception:
+    cp = None
+
+
+try:
     import quantstats as qs
 except Exception:
     qs = None
 
 from pypfopt import EfficientFrontier, expected_returns, risk_models
+from pypfopt import objective_functions
 from pypfopt.hierarchical_portfolio import HRPOpt
 from pypfopt.cla import CLA
 
@@ -76,6 +83,80 @@ def label_map():
     universe = load_universe()
     items = flatten_universe(universe)
     return {x["symbol"]: x["label"] for x in items}
+
+
+def symbol_group_map():
+    universe = load_universe()
+    mapping = {}
+    for group in universe.get("groups", []):
+        gname = group.get("name", "Unknown")
+        for item in group.get("items", []):
+            mapping[item.get("symbol")] = gname
+    return mapping
+
+
+def normalize_weight_dict(weight_dict, symbols):
+    """
+    Normalize a dict of weights to sum to 1.0 and align to `symbols`.
+    Accepts inputs either in fractions (0-1) or percents (0-100).
+    """
+    if not isinstance(weight_dict, dict):
+        weight_dict = {}
+    vals = {s: float(weight_dict.get(s, 0.0)) for s in symbols}
+    mx = max(vals.values()) if vals else 0.0
+    if mx > 1.5:
+        vals = {k: v / 100.0 for k, v in vals.items()}
+    total = sum(max(v, 0.0) for v in vals.values())
+    if total <= 0:
+        # equal-weight fallback
+        eq = 1.0 / max(len(symbols), 1)
+        return {s: eq for s in symbols}
+    vals = {k: max(v, 0.0) / total for k, v in vals.items()}
+    return vals
+
+
+def group_weight_breakdown(weight_series: pd.Series, group_map: dict):
+    rows = []
+    if weight_series is None or weight_series.empty:
+        return rows
+    tmp = weight_series.copy()
+    tmp.index = [group_map.get(s, "Unknown") for s in tmp.index]
+    by_group = tmp.groupby(tmp.index).sum().sort_values(ascending=False)
+    for g, w in by_group.items():
+        rows.append({"group": str(g), "weight": float(w)})
+    return rows
+
+
+def align_weights_for_risk(returns: pd.DataFrame, weight_series: pd.Series, min_abs=1e-10):
+    """
+    Align weights to returns columns, drop flat/empty series, renormalize.
+    Returns aligned weight series and aligned returns dataframe.
+    """
+    if returns is None or returns.empty:
+        raise RuntimeError("Not enough return data to compute risk contributions.")
+    if weight_series is None or weight_series.empty:
+        raise RuntimeError("Weights sum to zero after alignment.")
+
+    # Keep only columns with finite variance
+    r = returns.copy().dropna(how="all")
+    var = r.var(skipna=True)
+    keep = var[var > 0].index.tolist()
+    if len(keep) < 2:
+        raise RuntimeError("Too many flat assets after cleaning.")
+
+    r = r[keep].dropna()
+
+    w = weight_series.reindex(r.columns).fillna(0.0)
+    w = w[w.abs() > min_abs]
+    if w.empty or float(w.sum()) == 0.0:
+        raise RuntimeError("Weights sum to zero after alignment.")
+    w = w / float(w.sum())
+
+    # align returns to the remaining weight set
+    r = r[w.index].dropna()
+    if r.shape[1] < 2 or len(r) < 60:
+        raise RuntimeError("Not enough return data to compute risk contributions.")
+    return r, w
 
 
 def safe_pct_return(series: pd.Series, lookback: int):
@@ -273,61 +354,110 @@ def build_frontier_points(mu, cov_matrix):
     except Exception:
         return points
 
-    max_target = min(max(float(mu.quantile(0.75)), min_ret + 0.03), 0.60)
-    min_target = max(min_ret + 0.001, 0.001)
-
-    if max_target <= min_target:
-        max_target = min_target + 0.05
-
-    targets = np.linspace(min_target, max_target, 25)
-
-    for target in targets:
-        try:
-            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
-            ef.efficient_return(float(target))
-            exp_ret, vol, sharpe = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-            points.append({
-                "expected_return": float(exp_ret),
-                "volatility": float(vol),
-                "sharpe": float(sharpe)
-            })
-        except Exception:
-            continue
-
-    return points
-
-
-def optimize_with_strategy(prices, strategy, target_volatility, target_return):
+def optimize_with_strategy(prices, strategy, target_volatility, target_return, prior_weights=None, group_targets=None, min_weight=0.0, max_weight=1.0, group_map=None):
     mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
     cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
     rets = expected_returns.returns_from_prices(prices)
 
+    # Prior weights (optional)
+    symbols = list(prices.columns)
+    if group_map is None:
+        group_map = symbol_group_map()
+    if prior_weights is not None:
+        prior_weights = normalize_weight_dict(prior_weights, symbols)
+
+    # Group targets (optional) - normalize to sum to 1
+    if isinstance(group_targets, dict) and len(group_targets) > 0:
+        gt = {str(k): float(v) for k, v in group_targets.items()}
+        mx = max(gt.values()) if gt else 0.0
+        if mx > 1.5:
+            gt = {k: v/100.0 for k, v in gt.items()}
+        tot = sum(max(v, 0.0) for v in gt.values())
+        if tot > 0:
+            group_targets = {k: max(v, 0.0)/tot for k, v in gt.items()}
+        else:
+            group_targets = None
+
+    # A special mode: use prior weights as the portfolio (no optimization)
+    if strategy == "prior_only":
+        if prior_weights is None:
+            raise RuntimeError("Prior weights were not supplied.")
+        wvec = np.array([prior_weights[s] for s in symbols], dtype=float)
+        port_ret = float(mu.values @ wvec)
+        port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
+        sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
+        weights = {s: float(round(prior_weights[s], 6)) for s in symbols if prior_weights[s] > 1e-8}
+        perf = (port_ret, port_vol, sharpe)
+        frontier = build_frontier_points(mu, cov_matrix)
+        return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
+
+
     if strategy == "max_sharpe":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "min_volatility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.min_volatility()
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "max_quadratic_utility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.max_quadratic_utility(risk_aversion=1.0)
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "efficient_risk":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.efficient_risk(target_volatility=float(target_volatility))
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "efficient_return":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.efficient_return(target_return=float(target_return))
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -338,13 +468,13 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return):
         perf = hrp.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "cla_max_sharpe":
-        cla = CLA(mu, cov_matrix, weight_bounds=(0, 1))
+        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
         cla.max_sharpe()
         weights = cla.clean_weights()
         perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "cla_min_volatility":
-        cla = CLA(mu, cov_matrix, weight_bounds=(0, 1))
+        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
         cla.min_volatility()
         weights = cla.clean_weights()
         perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -378,6 +508,24 @@ def build_portfolio_context(payload):
     target_return = float(payload.get("target_return", 0.10))
     symbols = resolve_symbols(payload)
 
+    # Prior weights (from UI) and asset-class targets (optional)
+    prior_weights_input = payload.get("user_weights") or payload.get("prior_weights") or {}
+    group_targets_input = payload.get("group_targets") or {}
+    min_weight = float(payload.get("min_weight", 0.0))
+    max_weight = float(payload.get("max_weight", 1.0))
+    if max_weight <= 0 or max_weight > 1:
+        max_weight = 1.0
+    if min_weight < 0 or min_weight >= max_weight:
+        min_weight = 0.0
+
+    group_map = symbol_group_map()
+    prior_weights = normalize_weight_dict(prior_weights_input, symbols)
+    # For convenience: if group targets are not provided, derive them from prior weights
+    if not group_targets_input:
+        tmp = pd.Series(prior_weights)
+        tmp.index = [group_map.get(s, "Unknown") for s in tmp.index]
+        group_targets_input = tmp.groupby(tmp.index).sum().to_dict()
+
     if len(symbols) < 3:
         raise RuntimeError("At least 3 assets are required for portfolio construction")
 
@@ -398,13 +546,21 @@ def build_portfolio_context(payload):
         prices=prices,
         strategy=strategy,
         target_volatility=target_volatility,
-        target_return=target_return
+        target_return=target_return,
+        prior_weights=prior_weights,
+        group_targets=group_targets_input,
+        min_weight=min_weight,
+        max_weight=max_weight,
+        group_map=group_map
     )
 
     returns = prices.pct_change().dropna()
+    cov_returns = returns.cov() * TRADING_DAYS
+
     benchmark_returns = benchmark_prices.pct_change().dropna()
 
     weight_series = pd.Series(weights).reindex(prices.columns).fillna(0.0)
+    prior_weight_series = pd.Series(prior_weights).reindex(prices.columns).fillna(0.0)
     portfolio_returns = returns.mul(weight_series, axis=1).sum(axis=1).dropna()
 
     aligned = pd.concat(
@@ -448,7 +604,9 @@ def build_portfolio_context(payload):
         weight_table.append({
             "symbol": sym,
             "label": labels.get(sym, sym),
-            "weight": float(w)
+            "group": group_map.get(sym, "Unknown"),
+            "weight": float(w),
+            "prior_weight": float(prior_weight_series.get(sym, 0.0))
         })
 
     corr = returns.corr().fillna(0.0)
@@ -468,6 +626,12 @@ def build_portfolio_context(payload):
         "frontier": frontier,
         "top_assets": top_assets,
         "weight_table": weight_table,
+        "prior_weight_series": prior_weight_series,
+        "group_map": group_map,
+        "group_weights_prior": group_weight_breakdown(prior_weight_series, group_map),
+        "group_weights_optimized": group_weight_breakdown(weight_series, group_map),
+        "cov_returns": cov_returns,
+
         "metrics": {
             "expected_return": float(perf[0]),
             "volatility": float(perf[1]),
@@ -936,6 +1100,9 @@ def api_optimization(payload: dict = Body(...)):
             "used_symbols": list(ctx["prices"].columns),
             "metrics": ctx["metrics"],
             "weights": ctx["weight_table"],
+            "group_weights_prior": ctx.get("group_weights_prior", []),
+            "group_weights_optimized": ctx.get("group_weights_optimized", []),
+
             "allocation_donut": donut,
             "frontier": ctx["frontier"],
             "top_assets": [
@@ -998,9 +1165,11 @@ def api_risk(payload: dict = Body(...)):
         risk_99 = compute_risk_metrics(ctx["portfolio_returns"], confidence=0.99, horizon=horizon)
         risk_custom = compute_risk_metrics(ctx["portfolio_returns"], confidence=confidence, horizon=horizon)
 
+        aligned_returns, aligned_weights = align_weights_for_risk(ctx["returns"], ctx["weight_series"])
+
         risk_contributions = compute_risk_contributions(
-            ctx["weight_series"],
-            ctx["cov_matrix"],
+            aligned_weights,
+            (aligned_returns.cov() * TRADING_DAYS),
             ctx["labels"]
         )
 
@@ -1017,6 +1186,8 @@ def api_risk(payload: dict = Body(...)):
             "risk_95": risk_95,
             "risk_99": risk_99,
             "risk_contributions": risk_contributions,
+            "risk_contrib_group_breakdown": group_weight_breakdown(aligned_weights, ctx.get("group_map", {})),
+            "weights_used_for_risk": [{"symbol": s, "weight": float(w)} for s, w in aligned_weights.items()],
             "correlation_heatmap": heatmap
         }
         return JSONResponse(content=result)
