@@ -35,6 +35,10 @@ PUBLIC_DIR = BASE_DIR / "public"
 INDEX_FILE = PUBLIC_DIR / "index.html"
 if not INDEX_FILE.exists():
     INDEX_FILE = BASE_DIR / "index.html"
+if not INDEX_FILE.exists():
+    alt = BASE_DIR / "index_FINAL_v2_FEASIBILITY.html"
+    if alt.exists():
+        INDEX_FILE = alt
 UNIVERSE_FILE = BASE_DIR / "universe.json"
 
 app = FastAPI(title="Institutional Quant Platform")
@@ -48,6 +52,8 @@ CACHE = {
     "timestamp": 0
 }
 CACHE_TTL_SECONDS = 600
+
+UNIVERSE_ANALYTICS_CACHE = {"key": None, "payload": None, "timestamp": 0}
 
 
 def load_universe():
@@ -388,7 +394,7 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
         sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
         weights = {s: float(round(prior_weights[s], 6)) for s in symbols if prior_weights[s] > 1e-8}
         perf = (port_ret, port_vol, sharpe)
-        frontier = build_frontier_points(mu, cov_matrix)
+        frontier = build_frontier_points(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
         return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
 
 
@@ -463,164 +469,26 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "hrp":
-        # Hierarchical Risk Parity
-        # If group targets are provided, enforce them as hard constraints by:
-        # 1) Running HRP within each asset class on the subset returns
-        # 2) Scaling intra-class weights by the class target
-        if group_targets:
-            combined = {}
-            for g, tgt in group_targets.items():
-                tgt = float(tgt)
-                if tgt <= 0:
-                    continue
-                subset = [s for s in symbols if group_map.get(s, "Unknown") == g]
-                if len(subset) == 0:
-                    continue
-                if len(subset) == 1:
-                    combined[subset[0]] = combined.get(subset[0], 0.0) + tgt
-                else:
-                    try:
-                        hrp_sub = HRPOpt(rets[subset])
-                        w_sub = hrp_sub.optimize()  # sums to 1 within the group
-                        for s, wv in w_sub.items():
-                            combined[s] = combined.get(s, 0.0) + float(wv) * tgt
-                    except Exception:
-                        # fallback: equal-weight within group
-                        eq = tgt / float(len(subset))
-                        for s in subset:
-                            combined[s] = combined.get(s, 0.0) + eq
-
-            # Ensure weights sum to 1 and fill missing as 0
-            total = sum(max(v, 0.0) for v in combined.values())
-            if total <= 0:
-                raise RuntimeError("Asset-class targets sum to zero after cleaning. Increase at least one class target.")
-            combined = {k: max(v, 0.0) / total for k, v in combined.items()}
-            weights = {s: float(combined.get(s, 0.0)) for s in symbols}
-        else:
-            hrp = HRPOpt(rets)
-            weights = hrp.optimize()
-
-        # Performance proxy from mu/cov (consistent across strategies)
-        wvec = np.array([weights.get(s, 0.0) for s in symbols], dtype=float)
-        port_ret = float(mu.values @ wvec)
-        port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
-        sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
-        perf = (port_ret, port_vol, sharpe)
+        hrp = HRPOpt(rets)
+        weights = hrp.optimize()
+        perf = hrp.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "cla_max_sharpe":
-        # Critical Line Algorithm (Max Sharpe)
-        if group_targets:
-            combined = {}
-            for g, tgt in group_targets.items():
-                tgt = float(tgt)
-                if tgt <= 0:
-                    continue
-                subset = [s for s in symbols if group_map.get(s, "Unknown") == g]
-                if len(subset) == 0:
-                    continue
-                if len(subset) == 1:
-                    combined[subset[0]] = combined.get(subset[0], 0.0) + tgt
-                else:
-                    mu_sub = mu[subset]
-                    cov_sub = cov_matrix.loc[subset, subset]
-                    try:
-                        cla_sub = CLA(mu_sub, cov_sub, weight_bounds=(float(min_weight), float(max_weight)))
-                        cla_sub.max_sharpe()
-                        w_sub = cla_sub.clean_weights()
-                        # normalize within group defensively
-                        ssum = sum(max(v, 0.0) for v in w_sub.values())
-                        if ssum <= 0:
-                            eq = 1.0 / float(len(subset))
-                            w_sub = {s: eq for s in subset}
-                        else:
-                            w_sub = {k: max(v, 0.0)/ssum for k, v in w_sub.items()}
-                        for s, wv in w_sub.items():
-                            combined[s] = combined.get(s, 0.0) + float(wv) * tgt
-                    except Exception:
-                        eq = tgt / float(len(subset))
-                        for s in subset:
-                            combined[s] = combined.get(s, 0.0) + eq
-
-            total = sum(max(v, 0.0) for v in combined.values())
-            if total <= 0:
-                raise RuntimeError("Asset-class targets sum to zero after cleaning. Increase at least one class target.")
-            combined = {k: max(v, 0.0) / total for k, v in combined.items()}
-            weights = {s: float(combined.get(s, 0.0)) for s in symbols}
-
-            # feasibility check vs global bounds
-            if any((w > max_weight + 1e-6) for w in weights.values()):
-                raise RuntimeError("Class targets are incompatible with the Max Weight bound for this strategy. Increase Max Weight or adjust class targets.")
-            if min_weight > 0 and any((0 < w < min_weight - 1e-6) for w in weights.values()):
-                raise RuntimeError("Class targets are incompatible with the Min Weight bound for this strategy. Reduce Min Weight or adjust class targets.")
-            wvec = np.array([weights.get(s, 0.0) for s in symbols], dtype=float)
-            port_ret = float(mu.values @ wvec)
-            port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
-            sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
-            perf = (port_ret, port_vol, sharpe)
-        else:
-            cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-            cla.max_sharpe()
-            weights = cla.clean_weights()
-            perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        cla.max_sharpe()
+        weights = cla.clean_weights()
+        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     elif strategy == "cla_min_volatility":
-        # Critical Line Algorithm (Min Volatility)
-        if group_targets:
-            combined = {}
-            for g, tgt in group_targets.items():
-                tgt = float(tgt)
-                if tgt <= 0:
-                    continue
-                subset = [s for s in symbols if group_map.get(s, "Unknown") == g]
-                if len(subset) == 0:
-                    continue
-                if len(subset) == 1:
-                    combined[subset[0]] = combined.get(subset[0], 0.0) + tgt
-                else:
-                    mu_sub = mu[subset]
-                    cov_sub = cov_matrix.loc[subset, subset]
-                    try:
-                        cla_sub = CLA(mu_sub, cov_sub, weight_bounds=(float(min_weight), float(max_weight)))
-                        cla_sub.min_volatility()
-                        w_sub = cla_sub.clean_weights()
-                        ssum = sum(max(v, 0.0) for v in w_sub.values())
-                        if ssum <= 0:
-                            eq = 1.0 / float(len(subset))
-                            w_sub = {s: eq for s in subset}
-                        else:
-                            w_sub = {k: max(v, 0.0)/ssum for k, v in w_sub.items()}
-                        for s, wv in w_sub.items():
-                            combined[s] = combined.get(s, 0.0) + float(wv) * tgt
-                    except Exception:
-                        eq = tgt / float(len(subset))
-                        for s in subset:
-                            combined[s] = combined.get(s, 0.0) + eq
-
-            total = sum(max(v, 0.0) for v in combined.values())
-            if total <= 0:
-                raise RuntimeError("Asset-class targets sum to zero after cleaning. Increase at least one class target.")
-            combined = {k: max(v, 0.0) / total for k, v in combined.items()}
-            weights = {s: float(combined.get(s, 0.0)) for s in symbols}
-
-            if any((w > max_weight + 1e-6) for w in weights.values()):
-                raise RuntimeError("Class targets are incompatible with the Max Weight bound for this strategy. Increase Max Weight or adjust class targets.")
-            if min_weight > 0 and any((0 < w < min_weight - 1e-6) for w in weights.values()):
-                raise RuntimeError("Class targets are incompatible with the Min Weight bound for this strategy. Reduce Min Weight or adjust class targets.")
-            wvec = np.array([weights.get(s, 0.0) for s in symbols], dtype=float)
-            port_ret = float(mu.values @ wvec)
-            port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
-            sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
-            perf = (port_ret, port_vol, sharpe)
-        else:
-            cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-            cla.min_volatility()
-            weights = cla.clean_weights()
-            perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        cla.min_volatility()
+        weights = cla.clean_weights()
+        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
 
-    frontier = build_frontier_points(mu, cov_matrix)
+    frontier = build_frontier_points(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
     return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
 
 
@@ -1115,6 +983,238 @@ def _monthly_heatmap(returns: pd.Series):
     z = pivot.fillna(0.0).values.tolist()
     return {"years": years, "months": months, "z": z}
 
+
+def _extract_close_from_bulk(download_df: pd.DataFrame, symbol: str):
+    if download_df is None or download_df.empty:
+        return pd.Series(dtype=float)
+    if isinstance(download_df.columns, pd.MultiIndex):
+        try:
+            if symbol in download_df.columns.get_level_values(-1):
+                close = download_df.xs(symbol, axis=1, level=-1)["Close"]
+            else:
+                close = download_df["Close"][symbol]
+        except Exception:
+            try:
+                close = download_df.xs(symbol, axis=1, level=0)["Close"]
+            except Exception:
+                return pd.Series(dtype=float)
+    else:
+        close = download_df.get("Close", pd.Series(dtype=float))
+    if isinstance(close, pd.DataFrame):
+        try:
+            close = close.iloc[:, 0]
+        except Exception:
+            return pd.Series(dtype=float)
+    return pd.to_numeric(close, errors="coerce").dropna().sort_index()
+
+
+def _latest_signal_label(close: pd.Series, sma20: pd.Series, sma50: pd.Series, rsi14: pd.Series, macd_hist: pd.Series):
+    last_close = _safe_float(close.iloc[-1])
+    s20 = _safe_float(sma20.dropna().iloc[-1]) if not sma20.dropna().empty else None
+    s50 = _safe_float(sma50.dropna().iloc[-1]) if not sma50.dropna().empty else None
+    rsi = _safe_float(rsi14.dropna().iloc[-1]) if not rsi14.dropna().empty else None
+    mh = _safe_float(macd_hist.dropna().iloc[-1]) if not macd_hist.dropna().empty else None
+
+    bullish = 0
+    bearish = 0
+    if last_close is not None and s20 is not None and s50 is not None:
+        bullish += int(last_close > s20) + int(last_close > s50)
+        bearish += int(last_close < s20) + int(last_close < s50)
+    if rsi is not None:
+        bullish += int(rsi > 55)
+        bearish += int(rsi < 45)
+    if mh is not None:
+        bullish += int(mh > 0)
+        bearish += int(mh < 0)
+
+    if bullish >= 3 and bearish <= 1:
+        return "Bullish"
+    if bearish >= 3 and bullish <= 1:
+        return "Bearish"
+    return "Neutral"
+
+
+def build_universe_quantstats(period: str = "2y"):
+    universe = load_universe()
+    items = flatten_universe(universe)
+    if not items:
+        raise RuntimeError("Universe is empty")
+
+    symbols = []
+    labels = {}
+    groups = {}
+    for row in items:
+        s = row.get("symbol")
+        if not s or s in symbols:
+            continue
+        symbols.append(s)
+        labels[s] = row.get("label", s)
+        groups[s] = row.get("group", "Unknown")
+
+    raw = yf.download(
+        tickers=symbols,
+        period=period,
+        interval="1d",
+        auto_adjust=True,
+        progress=False,
+        threads=False,
+        group_by="ticker"
+    )
+    if raw is None or raw.empty:
+        raise RuntimeError("No market data returned for universe analytics")
+
+    rows = []
+    score_rows = []
+    monthly_matrix = {}
+
+    for symbol in symbols:
+        close = _extract_close_from_bulk(raw, symbol)
+        if len(close) < 80:
+            continue
+        returns = close.pct_change().dropna()
+        if len(returns) < 60:
+            continue
+
+        metrics = _quant_metrics(returns)
+        sma20 = close.rolling(20).mean()
+        sma50 = close.rolling(50).mean()
+        sma200 = close.rolling(200).mean()
+        rsi14 = _rsi(close, 14)
+        macd = _ema(close, 12) - _ema(close, 26)
+        macd_signal = _ema(macd, 9)
+        macd_hist = macd - macd_signal
+        vol20 = returns.rolling(20).std() * np.sqrt(TRADING_DAYS)
+        vol63 = returns.rolling(63).std() * np.sqrt(TRADING_DAYS)
+        cumulative, drawdown = compute_drawdown(returns)
+
+        latest_price = _safe_float(close.iloc[-1])
+        ret_1m = _safe_float(close.iloc[-1] / close.iloc[-22] - 1) if len(close) > 22 else None
+        ret_3m = _safe_float(close.iloc[-1] / close.iloc[-63] - 1) if len(close) > 63 else None
+        ret_1y = _safe_float(close.iloc[-1] / close.iloc[-252] - 1) if len(close) > 252 else None
+        sma20_last = _safe_float(sma20.dropna().iloc[-1]) if not sma20.dropna().empty else None
+        sma50_last = _safe_float(sma50.dropna().iloc[-1]) if not sma50.dropna().empty else None
+        sma200_last = _safe_float(sma200.dropna().iloc[-1]) if not sma200.dropna().empty else None
+        rsi_last = _safe_float(rsi14.dropna().iloc[-1]) if not rsi14.dropna().empty else None
+        macd_last = _safe_float(macd.dropna().iloc[-1]) if not macd.dropna().empty else None
+        macd_sig_last = _safe_float(macd_signal.dropna().iloc[-1]) if not macd_signal.dropna().empty else None
+        macd_hist_last = _safe_float(macd_hist.dropna().iloc[-1]) if not macd_hist.dropna().empty else None
+        dd_last = _safe_float(drawdown.dropna().iloc[-1]) if not drawdown.dropna().empty else None
+        signal = _latest_signal_label(close, sma20, sma50, rsi14, macd_hist)
+
+        trend_score = 0
+        trend_score += int(latest_price is not None and sma20_last is not None and latest_price > sma20_last)
+        trend_score += int(latest_price is not None and sma50_last is not None and latest_price > sma50_last)
+        trend_score += int(latest_price is not None and sma200_last is not None and latest_price > sma200_last)
+        trend_score += int(rsi_last is not None and rsi_last > 50)
+        trend_score += int(macd_hist_last is not None and macd_hist_last > 0)
+        trend_score = int(trend_score)
+
+        row = {
+            "symbol": symbol,
+            "label": labels.get(symbol, symbol),
+            "group": groups.get(symbol, "Unknown"),
+            "latest_price": latest_price,
+            "cagr": metrics.get("cagr"),
+            "volatility": metrics.get("volatility"),
+            "sharpe": metrics.get("sharpe"),
+            "sortino": metrics.get("sortino"),
+            "calmar": metrics.get("calmar"),
+            "max_drawdown": metrics.get("max_drawdown"),
+            "win_rate": metrics.get("win_rate"),
+            "skew": metrics.get("skew"),
+            "kurtosis": metrics.get("kurtosis"),
+            "ret_1m": ret_1m,
+            "ret_3m": ret_3m,
+            "ret_1y": ret_1y,
+            "rsi14": rsi_last,
+            "macd": macd_last,
+            "macd_signal": macd_sig_last,
+            "macd_hist": macd_hist_last,
+            "sma20": sma20_last,
+            "sma50": sma50_last,
+            "sma200": sma200_last,
+            "dist_sma20": _safe_float((latest_price / sma20_last - 1) if latest_price is not None and sma20_last not in (None, 0) else None),
+            "dist_sma50": _safe_float((latest_price / sma50_last - 1) if latest_price is not None and sma50_last not in (None, 0) else None),
+            "dist_sma200": _safe_float((latest_price / sma200_last - 1) if latest_price is not None and sma200_last not in (None, 0) else None),
+            "rolling_vol_20": _safe_float(vol20.dropna().iloc[-1] if not vol20.dropna().empty else None),
+            "rolling_vol_63": _safe_float(vol63.dropna().iloc[-1] if not vol63.dropna().empty else None),
+            "drawdown_now": dd_last,
+            "trend_score": trend_score,
+            "signal": signal
+        }
+        rows.append(row)
+        score_rows.append({
+            "symbol": symbol,
+            "label": labels.get(symbol, symbol),
+            "group": groups.get(symbol, "Unknown"),
+            "trend_score": trend_score,
+            "signal": signal
+        })
+
+        mh = _monthly_heatmap(returns)
+        yearly_avg = {}
+        if mh.get("years") and mh.get("months"):
+            years = mh["years"]
+            months = mh["months"]
+            z = mh["z"]
+            for yi, y in enumerate(years):
+                vals = []
+                for mi, _ in enumerate(months):
+                    try:
+                        vals.append(float(z[yi][mi]))
+                    except Exception:
+                        pass
+                if vals:
+                    yearly_avg[str(y)] = float(np.nanmean(vals))
+        monthly_matrix[symbol] = yearly_avg
+
+    if not rows:
+        raise RuntimeError("No symbols had enough history for quant analytics")
+
+    df = pd.DataFrame(rows)
+    df = df.sort_values(["trend_score", "sharpe", "cagr"], ascending=[False, False, False], na_position="last").reset_index(drop=True)
+
+    summary = {
+        "instrument_count": int(len(df)),
+        "bullish_count": int((df["signal"] == "Bullish").sum()),
+        "neutral_count": int((df["signal"] == "Neutral").sum()),
+        "bearish_count": int((df["signal"] == "Bearish").sum()),
+        "avg_sharpe": _safe_float(df["sharpe"].dropna().mean()),
+        "avg_cagr": _safe_float(df["cagr"].dropna().mean()),
+        "avg_volatility": _safe_float(df["volatility"].dropna().mean()),
+        "best_symbol": None if df.empty else df.iloc[0]["symbol"]
+    }
+
+    scatter = [
+        {
+            "symbol": r["symbol"],
+            "label": r["label"],
+            "group": r["group"],
+            "x": _safe_float(r["volatility"]),
+            "y": _safe_float(r["cagr"]),
+            "size": _safe_float(r["sharpe"]),
+            "signal": r["signal"]
+        }
+        for _, r in df.iterrows()
+    ]
+
+    leaders = {
+        "top_sharpe": df[["symbol", "label", "group", "sharpe"]].dropna().sort_values("sharpe", ascending=False).head(10).to_dict(orient="records"),
+        "top_cagr": df[["symbol", "label", "group", "cagr"]].dropna().sort_values("cagr", ascending=False).head(10).to_dict(orient="records"),
+        "lowest_drawdown": df[["symbol", "label", "group", "max_drawdown"]].dropna().sort_values("max_drawdown", ascending=False).head(10).to_dict(orient="records"),
+        "top_trend": df[["symbol", "label", "group", "trend_score", "signal"]].sort_values(["trend_score", "signal"], ascending=[False, True]).head(10).to_dict(orient="records")
+    }
+
+    return {
+        "period": period,
+        "generated_at": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "summary": summary,
+        "rows": df.to_dict(orient="records"),
+        "scatter": scatter,
+        "leaders": leaders,
+        "monthly_matrix": monthly_matrix
+    }
+
 def build_technical_analysis(symbol: str, period: str = "2y"):
     close = _download_close(symbol, period=period, interval="1d")
     returns = close.pct_change().dropna()
@@ -1334,6 +1434,7 @@ def api_risk(payload: dict = Body(...)):
 
 
 @app.post("/api/lstm-forecast")
+@app.post("/api/forecast")
 def api_lstm_forecast(payload: dict = Body(...)):
     try:
         group_filter = payload.get("group_filter", "ALL")
