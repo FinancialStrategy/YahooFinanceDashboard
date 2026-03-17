@@ -235,6 +235,47 @@
       overflow: auto;
     }
 
+    .dashboard-banner {
+      background: linear-gradient(135deg, #f7f7f7 0%, #ededed 100%);
+      border: 1px solid #d6d6d6;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+
+    .signal-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 999px;
+      border: 1px solid #bbb;
+      background: #fff;
+    }
+
+    .signal-bullish { border-color: #0a7f2e; color: #0a7f2e; }
+    .signal-neutral { border-color: #8a6200; color: #8a6200; }
+    .signal-bearish { border-color: #b30000; color: #b30000; }
+
+    .compact-table td, .compact-table th {
+      font-size: 12px;
+      padding: 8px 7px;
+    }
+
+    .mini-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12px;
+      color: #444;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -388,6 +429,7 @@
       <button class="tab-btn" data-tab="analytics-pane">Analytics</button>
       <button class="tab-btn" data-tab="risk-pane">Risk Dashboard</button>
       <button class="tab-btn" data-tab="forecast-pane">Forecast</button>
+      <button class="tab-btn" data-tab="universe-qs-pane">QuantStats Universe</button>
     </div>
 
     <div class="content-area">
@@ -2073,7 +2115,122 @@ async function runOptimization() {
     document.getElementById("run-analytics-btn").addEventListener("click", runAnalytics);
     document.getElementById("run-risk-btn").addEventListener("click", runRisk);
     document.getElementById("run-forecast-btn").addEventListener("click", runForecast);
+    function fmtNum(x, digits=2) {
+      const v = Number(x);
+      return Number.isFinite(v) ? v.toFixed(digits) : "—";
+    }
+
+    function fmtPct1(x) {
+      const v = Number(x);
+      return Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : "—";
+    }
+
+    function signalBadge(signal) {
+      const s = signal || "Neutral";
+      const cls = s === "Bullish" ? "signal-bullish" : s === "Bearish" ? "signal-bearish" : "signal-neutral";
+      return `<span class="signal-badge ${cls}">${s}</span>`;
+    }
+
+    function renderMiniList(elId, rows, metric) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.innerHTML = (rows || []).slice(0, 5).map(r => `<li><strong>${r.symbol}</strong> <span style="color:#666;">(${r.group || ""})</span> — ${metric(r)}</li>`).join("");
+    }
+
+    function renderUniverseQuantTable(rows) {
+      const tbody = document.getElementById("qs-universe-body");
+      tbody.innerHTML = (rows || []).map(r => `
+        <tr>
+          <td>${r.symbol || ""}</td>
+          <td class="left-text">${r.label || ""}</td>
+          <td>${r.group || ""}</td>
+          <td>${signalBadge(r.signal)}</td>
+          <td>${fmtNum(r.trend_score, 0)}</td>
+          <td class="right-text">${fmtPct1(r.cagr)}</td>
+          <td class="right-text">${fmtPct1(r.volatility)}</td>
+          <td class="right-text">${fmtNum(r.sharpe)}</td>
+          <td class="right-text">${fmtNum(r.sortino)}</td>
+          <td class="right-text">${fmtPct1(r.max_drawdown)}</td>
+          <td class="right-text">${fmtPct1(r.win_rate)}</td>
+          <td class="right-text">${fmtPct1(r.ret_1m)}</td>
+          <td class="right-text">${fmtPct1(r.ret_3m)}</td>
+          <td class="right-text">${fmtPct1(r.ret_1y)}</td>
+          <td class="right-text">${fmtNum(r.rsi14)}</td>
+          <td class="right-text">${fmtNum(r.macd_hist, 4)}</td>
+          <td class="right-text">${fmtPct1(r.dist_sma20)}</td>
+          <td class="right-text">${fmtPct1(r.dist_sma50)}</td>
+          <td class="right-text">${fmtPct1(r.dist_sma200)}</td>
+          <td class="right-text">${fmtPct1(r.rolling_vol_20)}</td>
+          <td class="right-text">${fmtPct1(r.rolling_vol_63)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderUniverseScatter(rows) {
+      const valid = (rows || []).filter(r => Number.isFinite(Number(r.volatility)) && Number.isFinite(Number(r.cagr)));
+      const bySignal = { Bullish: [], Neutral: [], Bearish: [] };
+      valid.forEach(r => {
+        const key = ["Bullish", "Neutral", "Bearish"].includes(r.signal) ? r.signal : "Neutral";
+        bySignal[key].push(r);
+      });
+      const traces = Object.keys(bySignal).map(sig => ({
+        type: "scatter",
+        mode: "markers",
+        name: sig,
+        x: bySignal[sig].map(r => r.volatility * 100),
+        y: bySignal[sig].map(r => r.cagr * 100),
+        text: bySignal[sig].map(r => `${r.symbol}<br>${r.label}<br>Sharpe: ${fmtNum(r.sharpe)}<br>Trend: ${fmtNum(r.trend_score,0)}`),
+        hovertemplate: "%{text}<extra></extra>",
+        marker: { size: bySignal[sig].map(r => Math.max(10, 10 + (Number.isFinite(Number(r.sharpe)) ? Number(r.sharpe) * 4 : 0))) }
+      }));
+      Plotly.newPlot("qs-scatter-chart", traces, {
+        margin: { t: 30, r: 20, b: 55, l: 60 },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8",
+        xaxis: { title: "Annualized Volatility (%)", gridcolor: "#e1e1e1" },
+        yaxis: { title: "CAGR (%)", gridcolor: "#e1e1e1" },
+        legend: { orientation: "h" }
+      }, {responsive:true});
+    }
+
+    async function runUniverseQuantStats() {
+      const btn = document.getElementById("run-universe-qs-btn");
+      const status = document.getElementById("qs-status");
+      try {
+        btn.disabled = true;
+        status.textContent = "Running QuantStats universe scan...";
+        const res = await fetch("/api/universe-analytics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ period: document.getElementById("qs-period").value })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Universe quant scan failed");
+
+        document.getElementById("qs-kpi-count").textContent = fmtNum(data.summary?.instrument_count, 0);
+        document.getElementById("qs-kpi-sharpe").textContent = fmtNum(data.summary?.avg_sharpe);
+        document.getElementById("qs-kpi-cagr").textContent = fmtPct1(data.summary?.avg_cagr);
+        document.getElementById("qs-kpi-vol").textContent = fmtPct1(data.summary?.avg_volatility);
+        document.getElementById("qs-kpi-bull").textContent = fmtNum(data.summary?.bullish_count, 0);
+        document.getElementById("qs-kpi-neutral").textContent = fmtNum(data.summary?.neutral_count, 0);
+        document.getElementById("qs-kpi-bear").textContent = fmtNum(data.summary?.bearish_count, 0);
+
+        renderMiniList("qs-top-sharpe", data.leaders?.top_sharpe || [], r => `Sharpe ${fmtNum(r.sharpe)}`);
+        renderMiniList("qs-top-cagr", data.leaders?.top_cagr || [], r => `CAGR ${fmtPct1(r.cagr)}`);
+        renderMiniList("qs-low-dd", data.leaders?.lowest_drawdown || [], r => `Max DD ${fmtPct1(r.max_drawdown)}`);
+        renderMiniList("qs-top-trend", data.leaders?.top_trend || [], r => `Trend ${fmtNum(r.trend_score,0)} • ${r.signal || ""}`);
+        renderUniverseScatter(data.rows || []);
+        renderUniverseQuantTable(data.rows || []);
+        status.textContent = `Universe scan completed. ${fmtNum(data.summary?.instrument_count,0)} instruments processed. Generated at ${data.generated_at || ""}.`;
+      } catch (err) {
+        status.textContent = `Universe scan failed: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     document.getElementById("run-ta-btn").addEventListener("click", runTechnicalAnalysis);
+    document.getElementById("run-universe-qs-btn").addEventListener("click", runUniverseQuantStats);
 
     (async function init() {
       setupTabs();
