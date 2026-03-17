@@ -493,6 +493,7 @@
             <option value="hrp">Hierarchical Risk Parity</option>
             <option value="cla_max_sharpe">CLA Max Sharpe</option>
             <option value="cla_min_volatility">CLA Min Volatility</option>
+            <option value="prior_only">Use Prior Weights (No Optimization)</option>
           </select>
 
           <label for="target-volatility">Target Vol (%)</label>
@@ -500,6 +501,12 @@
 
           <label for="target-return">Target Return (%)</label>
           <input id="target-return" type="number" value="12" step="0.5" min="1" max="80">
+
+          <label for="min-weight">Min Weight (%)</label>
+          <input id="min-weight" type="number" value="0" step="0.5" min="0" max="50">
+
+          <label for="max-weight">Max Weight (%)</label>
+          <input id="max-weight" type="number" value="40" step="0.5" min="1" max="100">
 
           <button id="run-optimization-btn">Run Construction</button>
         </div>
@@ -546,9 +553,11 @@
             <table>
               <thead>
                 <tr>
+                  <th>Asset Class</th>
                   <th>Symbol</th>
                   <th>Instrument</th>
-                  <th class="right-text">Weight</th>
+                  <th class="right-text">Prior</th>
+                  <th class="right-text">Optimized</th>
                 </tr>
               </thead>
               <tbody id="weights-table-body"></tbody>
@@ -556,7 +565,25 @@
           </div>
         </div>
 
-        <div id="construction-status" class="status-line"></div>
+        
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Asset Class Weights · Prior vs Optimized</div>
+          <div id="group-weights-chart" class="wide-plot"></div>
+          <div class="table-shell" style="max-height:320px; margin-top:10px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset Class</th>
+                  <th class="right-text">Prior Weight</th>
+                  <th class="right-text">Optimized Weight</th>
+                </tr>
+              </thead>
+              <tbody id="group-weights-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+<div id="construction-status" class="status-line"></div>
       </div>
 
       <div id="analytics-pane" class="tab-pane">
@@ -984,15 +1011,43 @@
       populateTechnicalSymbolSelector();
     }
 
+    
+    function computeGroupTargets(rows) {
+      const out = {};
+      rows.forEach(r => {
+        const g = r.group || "Unknown";
+        const w = (Number(r.current_weight) || 0) / 100;
+        out[g] = (out[g] || 0) + w;
+      });
+      // normalize to sum 1 (ignore groups with 0)
+      const total = Object.values(out).reduce((a,b)=>a+b, 0);
+      if (total > 0) {
+        Object.keys(out).forEach(k => out[k] = out[k] / total);
+      }
+      return out;
+    }
+
     function basePayload() {
+      const rows = filteredRows();
+      const minW = (parseFloat(document.getElementById("min-weight")?.value) || 0) / 100;
+      const maxW = (parseFloat(document.getElementById("max-weight")?.value) || 100) / 100;
+
+      const userWeights = {};
+      rows.forEach(r => { userWeights[r.symbol] = (Number(r.current_weight) || 0) / 100; });
+
       return {
-        symbols: filteredRows().map(r => r.symbol),
+        symbols: rows.map(r => r.symbol),
         group_filter: currentGroupFilter(),
         strategy: document.getElementById("opt-strategy").value,
         target_volatility: (parseFloat(document.getElementById("target-volatility").value) || 15) / 100,
-        target_return: (parseFloat(document.getElementById("target-return").value) || 12) / 100
+        target_return: (parseFloat(document.getElementById("target-return").value) || 12) / 100,
+        user_weights: userWeights,
+        group_targets: computeGroupTargets(rows),
+        min_weight: minW,
+        max_weight: maxW
       };
     }
+
 
     function strategyLabel(v) {
       const map = {
@@ -1118,22 +1173,65 @@
       }, { responsive: true, displayModeBar: true });
     }
 
-    function renderWeightsTable(data) {
+    
+    function renderGroupWeights(priorRows, optRows) {
+      const prior = {};
+      (priorRows || []).forEach(r => { prior[r.group] = r.weight; });
+      const opt = {};
+      (optRows || []).forEach(r => { opt[r.group] = r.weight; });
+
+      const groups = Array.from(new Set([...Object.keys(prior), ...Object.keys(opt)])).sort();
+      const tbody = document.getElementById("group-weights-table-body");
+      if (tbody) tbody.innerHTML = "";
+
+      const chartX = groups;
+      const priorY = groups.map(g => (prior[g] || 0) * 100);
+      const optY = groups.map(g => (opt[g] || 0) * 100);
+
+      if (tbody) {
+        groups.forEach(g => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${g}</td>
+            <td class="right-text">${(prior[g] || 0) * 100 >= 0.005 ? ((prior[g] || 0) * 100).toFixed(2) + "%" : "0.00%"}</td>
+            <td class="right-text">${(opt[g] || 0) * 100 >= 0.005 ? ((opt[g] || 0) * 100).toFixed(2) + "%" : "0.00%"}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      Plotly.newPlot("group-weights-chart", [
+        { x: priorY, y: groups, type: "bar", orientation: "h", name: "Prior", marker: { color: "#9aa0a6" } },
+        { x: optY, y: groups, type: "bar", orientation: "h", name: "Optimized", marker: { color: "#7a0019" } }
+      ], {
+        barmode: "group",
+        margin: { l: 160, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Weight (%)", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8",
+        legend: { orientation: "h" }
+      }, { responsive: true, displayModeBar: true });
+    }
+
+function renderWeightsTable(data) {
       const tbody = document.getElementById("weights-table-body");
       tbody.innerHTML = "";
 
       (data.weights || []).forEach(row => {
         const tr = document.createElement("tr");
+        const prior = Number(row.prior_weight || 0) * 100;
+        const opt = Number(row.weight || 0) * 100;
         tr.innerHTML = `
+          <td>${row.group || "Unknown"}</td>
           <td>${row.symbol}</td>
           <td class="left-text">${row.label}</td>
-          <td class="right-text">${(row.weight * 100).toFixed(2)}%</td>
+          <td class="right-text">${prior.toFixed(2)}%</td>
+          <td class="right-text">${opt.toFixed(2)}%</td>
         `;
         tbody.appendChild(tr);
       });
     }
-
-    async function runOptimization() {
+async function runOptimization() {
       const btn = document.getElementById("run-optimization-btn");
       const status = document.getElementById("construction-status");
       btn.disabled = true;
@@ -1345,7 +1443,7 @@
 
       Plotly.newPlot("risk-contrib-bar-chart", [{
         x: ordered.map(r => r.percent_risk_contribution * 100),
-        y: ordered.map(r => r.symbol),
+        y: ordered.map(r => (r.label ? `${r.label} (${r.symbol})` : r.symbol)),
         type: "bar",
         orientation: "h",
         marker: { color: "#7a0019" },
