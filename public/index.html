@@ -343,6 +343,7 @@
 
     <div class="tab-strip">
       <button class="tab-btn active" data-tab="overview-pane">Overview</button>
+      <button class="tab-btn" data-tab="technical-pane">Technical Analysis</button>
       <button class="tab-btn" data-tab="construction-pane">Portfolio Construction</button>
       <button class="tab-btn" data-tab="analytics-pane">Analytics</button>
       <button class="tab-btn" data-tab="risk-pane">Risk Dashboard</button>
@@ -397,10 +398,14 @@
                 <th style="width:10%">Symbol</th>
                 <th style="width:18%">Name</th>
                 <th style="width:10%">Price</th>
-                <th style="width:8%">1M</th>
-                <th style="width:8%">3M</th>
-                <th style="width:8%">YTD</th>
-                <th style="width:10%">Vol 30d</th>
+                <th style="width:7%">1D</th>
+                <th style="width:7%">1W</th>
+                <th style="width:7%">1M</th>
+                <th style="width:7%">3M</th>
+                <th style="width:7%">YTD</th>
+                <th style="width:7%">6M</th>
+                <th style="width:7%">1Y</th>
+                <th style="width:9%">Vol 30d</th>
                 <th style="width:12%">Sparkline</th>
                 <th style="width:8%">Weight</th>
               </tr>
@@ -413,6 +418,68 @@
           Total portfolio weight cannot exceed 100%.
         </div>
       </div>
+
+      
+      <div id="technical-pane" class="tab-pane">
+        <div class="toolbar">
+          <label for="ta-symbol">Instrument</label>
+          <select id="ta-symbol"></select>
+
+          <label for="ta-period">Period</label>
+          <select id="ta-period">
+            <option value="6mo">6M</option>
+            <option value="1y">1Y</option>
+            <option value="2y" selected>2Y</option>
+            <option value="5y">5Y</option>
+            <option value="10y">10Y</option>
+          </select>
+
+          <button id="run-ta-btn">Run Technical Analysis</button>
+        </div>
+
+        <div class="small-note">
+          Technical metrics and indicators are computed for the selected instrument using Yahoo Finance data only.
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-box"><div class="kpi-label">CAGR</div><div class="kpi-value" id="ta-cagr">—</div><div class="kpi-subnote">Annualized growth rate</div></div>
+          <div class="kpi-box"><div class="kpi-label">Volatility</div><div class="kpi-value" id="ta-vol">—</div><div class="kpi-subnote">Annualized volatility</div></div>
+          <div class="kpi-box"><div class="kpi-label">Sharpe</div><div class="kpi-value" id="ta-sharpe">—</div><div class="kpi-subnote">Risk-adjusted performance</div></div>
+          <div class="kpi-box"><div class="kpi-label">Max Drawdown</div><div class="kpi-value" id="ta-mdd">—</div><div class="kpi-subnote">Worst peak-to-trough decline</div></div>
+        </div>
+
+        <div class="two-col-equal">
+          <div class="panel-box">
+            <div class="section-title">Price + Moving Averages</div>
+            <div id="ta-price-chart" class="medium-plot"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">RSI (14)</div>
+            <div id="ta-rsi-chart" class="medium-plot"></div>
+          </div>
+        </div>
+
+        <div class="two-col-equal">
+          <div class="panel-box">
+            <div class="section-title">Drawdown</div>
+            <div id="ta-drawdown-chart" class="medium-plot"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">Rolling Volatility (63D)</div>
+            <div id="ta-rollingvol-chart" class="medium-plot"></div>
+          </div>
+        </div>
+
+        <div class="section-block" style="margin-top:16px;">
+          <div class="panel-box">
+            <div class="section-title">Monthly Returns Heatmap</div>
+            <div id="ta-heatmap-chart" class="medium-plot"></div>
+          </div>
+        </div>
+
+        <div id="ta-status" class="status-line"></div>
+      </div>
+
 
       <div id="construction-pane" class="tab-pane">
         <div class="toolbar">
@@ -798,7 +865,7 @@
       document.getElementById("card-count").textContent = visibleRows.length;
 
       const positiveCount = visibleRows.filter(r => {
-        const v = r.daily_change_pct;
+        const v = (r.ret_1d_pct !== undefined && r.ret_1d_pct !== null) ? r.ret_1d_pct : r.daily_change_pct;
         return v !== null && v !== undefined && !Number.isNaN(v) && Number(v) > 0;
       }).length;
 
@@ -846,7 +913,7 @@
       Object.entries(groupMap).forEach(([groupName, items]) => {
         const trGroup = document.createElement("tr");
         trGroup.className = "group-row";
-        trGroup.innerHTML = `<td colspan="10" class="left-text">${groupName}</td>`;
+        trGroup.innerHTML = `<td colspan="14" class="left-text">${groupName}</td>`;
         tbody.appendChild(trGroup);
 
         items.forEach(row => {
@@ -856,9 +923,13 @@
             <td>${row.symbol}</td>
             <td>${row.label}</td>
             <td>${fmtNumber(row.price, 2)}</td>
+            <td>${fmtPctRaw(row.ret_1d_pct)}</td>
+            <td>${fmtPctRaw(row.ret_1w_pct)}</td>
             <td>${fmtPctRaw(row.ret_1m_pct)}</td>
             <td>${fmtPctRaw(row.ret_3m_pct)}</td>
             <td>${fmtPctRaw(row.ytd_pct)}</td>
+            <td>${fmtPctRaw(row.ret_6m_pct)}</td>
+            <td>${fmtPctRaw(row.ret_1y_pct)}</td>
             <td>${fmtPctRaw(row.vol_30d_pct)}</td>
             <td><div class="spark-wrap"><canvas id="${normalizeChartId(row.symbol)}"></canvas></div></td>
             <td><input class="weight-input" type="number" min="0" max="100" step="0.5" value="${fmtNumber(row.current_weight,1)}" data-symbol="${row.symbol}"></td>
@@ -910,6 +981,7 @@
 
       document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
       buildRows(currentGroupFilter());
+      populateTechnicalSymbolSelector();
     }
 
     function basePayload() {
@@ -1428,6 +1500,171 @@
       }
     }
 
+    
+    function populateTechnicalSymbolSelector() {
+      const sel = document.getElementById("ta-symbol");
+      if (!sel) return;
+
+      const rows = filteredRows();
+      const previous = sel.value;
+      sel.innerHTML = "";
+
+      rows.forEach(r => {
+        const opt = document.createElement("option");
+        opt.value = r.symbol;
+        opt.textContent = `${r.symbol} — ${r.label}`;
+        sel.appendChild(opt);
+      });
+
+      if (rows.length && rows.some(r => r.symbol === previous)) {
+        sel.value = previous;
+      }
+    }
+
+    function renderTechnicalMetrics(data) {
+      const m = data.metrics || {};
+      document.getElementById("ta-cagr").textContent = fmtPctDecimal(m.cagr);
+      document.getElementById("ta-vol").textContent = fmtPctDecimal(m.volatility);
+      document.getElementById("ta-sharpe").textContent = fmtNumber(m.sharpe, 2);
+      document.getElementById("ta-mdd").textContent = fmtPctDecimal(m.max_drawdown);
+    }
+
+    function plotTechnicalPrice(data) {
+      const px = data.price || [];
+      const sma20 = data.sma20 || [];
+      const sma50 = data.sma50 || [];
+
+      Plotly.newPlot("ta-price-chart", [
+        { x: px.map(r => r.date), y: px.map(r => r.value), type: "scatter", mode: "lines", name: "Price", line: { width: 3, color: "#7a0019" } },
+        { x: sma20.map(r => r.date), y: sma20.map(r => r.value), type: "scatter", mode: "lines", name: "SMA 20", line: { width: 2, color: "#1f4e79" } },
+        { x: sma50.map(r => r.date), y: sma50.map(r => r.value), type: "scatter", mode: "lines", name: "SMA 50", line: { width: 2, color: "#3b3b3b" } }
+      ], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Date", gridcolor: "#d8d8d8" },
+        yaxis: { title: "Price", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8",
+        legend: { orientation: "h" }
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    function plotTechnicalRSI(data) {
+      const rsi = data.rsi14 || [];
+      Plotly.newPlot("ta-rsi-chart", [{
+        x: rsi.map(r => r.date),
+        y: rsi.map(r => r.value),
+        type: "scatter",
+        mode: "lines",
+        line: { width: 3, color: "#1f4e79" },
+        hovertemplate: "Date: %{x}<br>RSI: %{y:.2f}<extra></extra>"
+      }], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Date", gridcolor: "#d8d8d8" },
+        yaxis: { title: "RSI", gridcolor: "#d8d8d8", range: [0, 100] },
+        shapes: [
+          { type: "line", xref: "paper", x0: 0, x1: 1, y0: 70, y1: 70, line: { color: "#b30000", width: 1, dash: "dot" } },
+          { type: "line", xref: "paper", x0: 0, x1: 1, y0: 30, y1: 30, line: { color: "#0a7f2e", width: 1, dash: "dot" } }
+        ],
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    function plotTechnicalDrawdown(data) {
+      const dd = data.drawdown || [];
+      Plotly.newPlot("ta-drawdown-chart", [{
+        x: dd.map(r => r.date),
+        y: dd.map(r => r.value * 100),
+        type: "scatter",
+        mode: "lines",
+        fill: "tozeroy",
+        line: { width: 3, color: "#7a0019" },
+        hovertemplate: "Date: %{x}<br>Drawdown: %{y:.2f}%<extra></extra>"
+      }], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Date", gridcolor: "#d8d8d8" },
+        yaxis: { title: "Drawdown (%)", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    function plotTechnicalRollingVol(data) {
+      const rv = data.rolling_vol || [];
+      Plotly.newPlot("ta-rollingvol-chart", [{
+        x: rv.map(r => r.date),
+        y: rv.map(r => r.value * 100),
+        type: "scatter",
+        mode: "lines",
+        line: { width: 3, color: "#3b3b3b" },
+        hovertemplate: "Date: %{x}<br>Rolling Vol: %{y:.2f}%<extra></extra>"
+      }], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Date", gridcolor: "#d8d8d8" },
+        yaxis: { title: "Volatility (%)", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    function plotMonthlyHeatmap(data) {
+      const hm = data.monthly_heatmap || { years: [], months: [], z: [] };
+      const months = (hm.months || []).map(m => String(m).padStart(2, "0"));
+      Plotly.newPlot("ta-heatmap-chart", [{
+        z: hm.z || [],
+        x: months,
+        y: hm.years || [],
+        type: "heatmap",
+        colorscale: "RdBu",
+        reversescale: true,
+        zmid: 0,
+        hovertemplate: "Year: %{y}<br>Month: %{x}<br>Return: %{z:.2%}<extra></extra>"
+      }], {
+        margin: { l: 60, r: 25, t: 20, b: 50 },
+        xaxis: { title: "Month", gridcolor: "#d8d8d8" },
+        yaxis: { title: "Year", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    async function runTechnicalAnalysis() {
+      const btn = document.getElementById("run-ta-btn");
+      const status = document.getElementById("ta-status");
+      btn.disabled = true;
+      btn.textContent = "Running...";
+      status.textContent = "Technical analysis is running...";
+
+      try {
+        const symbol = document.getElementById("ta-symbol").value;
+        const period = document.getElementById("ta-period").value;
+
+        const res = await fetch("/api/technical", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol, period })
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Technical analysis failed");
+
+        renderTechnicalMetrics(data);
+        plotTechnicalPrice(data);
+        plotTechnicalRSI(data);
+        plotTechnicalDrawdown(data);
+        plotTechnicalRollingVol(data);
+        plotMonthlyHeatmap(data);
+
+        status.textContent = `Technical analysis complete · Symbol: ${data.symbol}`;
+      } catch (err) {
+        status.textContent = `Technical analysis error: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Run Technical Analysis";
+      }
+    }
+
+
     function setupTabs() {
       document.querySelectorAll(".tab-btn").forEach(btn => {
         btn.addEventListener("click", () => {
@@ -1443,6 +1680,8 @@
       buildRows(currentGroupFilter());
       updateOverviewCards(filteredRows());
       updateWeightTotal();
+      populateForecastSymbolSelector();
+      populateTechnicalSymbolSelector();
     });
 
     document.getElementById("refresh-btn").addEventListener("click", async () => {
@@ -1453,6 +1692,7 @@
     document.getElementById("run-analytics-btn").addEventListener("click", runAnalytics);
     document.getElementById("run-risk-btn").addEventListener("click", runRisk);
     document.getElementById("run-forecast-btn").addEventListener("click", runForecast);
+    document.getElementById("run-ta-btn").addEventListener("click", runTechnicalAnalysis);
 
     (async function init() {
       setupTabs();
