@@ -8,17 +8,17 @@
         {
           "symbol": "SPY",
           "label": "SPDR S&P 500 ETF Trust",
-          "target": 0.046419
+          "target": 0.04329
         },
         {
           "symbol": "IVV",
           "label": "iShares Core S&P 500 ETF",
-          "target": 0.039788
+          "target": 0.04329
         },
         {
           "symbol": "VOO",
           "label": "Vanguard S&P 500 ETF",
-          "target": 0.039788
+          "target": 0.04329
         }
       ]
     },
@@ -30,61 +30,61 @@
         {
           "symbol": "QQQ",
           "label": "Invesco QQQ Trust",
-          "target": 0.039788
+          "target": 0.032468
         },
         {
           "symbol": "VUG",
           "label": "Vanguard Growth ETF",
-          "target": 0.026525
+          "target": 0.027056
         },
         {
           "symbol": "IWF",
           "label": "iShares Russell 1000 Growth ETF",
-          "target": 0.026525
+          "target": 0.027056
         }
       ]
     },
     {
       "family": "ETF",
-      "name": "US Equity ETF - Value & Dividend",
+      "name": "US Equity ETF - Value",
       "color": "#1e40af",
       "items": [
         {
           "symbol": "VTV",
           "label": "Vanguard Value ETF",
-          "target": 0.026525
+          "target": 0.021645
         },
         {
           "symbol": "IVE",
           "label": "iShares S&P 500 Value ETF",
-          "target": 0.019894
+          "target": 0.021645
         },
         {
-          "symbol": "SCHD",
-          "label": "Schwab U.S. Dividend Equity ETF",
-          "target": 0.019894
+          "symbol": "SCHV",
+          "label": "Schwab US Large-Cap Value ETF",
+          "target": 0.021645
         }
       ]
     },
     {
       "family": "ETF",
-      "name": "US Equity ETF - Small & Mid Cap",
+      "name": "US Small & Mid Cap ETF",
       "color": "#3b82f6",
       "items": [
         {
           "symbol": "IWM",
           "label": "iShares Russell 2000 ETF",
-          "target": 0.019894
+          "target": 0.021645
         },
         {
           "symbol": "IJH",
           "label": "iShares Core S&P Mid-Cap ETF",
-          "target": 0.019894
+          "target": 0.021645
         },
         {
           "symbol": "VB",
           "label": "Vanguard Small-Cap ETF",
-          "target": 0.019894
+          "target": 0.021645
         }
       ]
     },
@@ -96,17 +96,17 @@
         {
           "symbol": "VEA",
           "label": "Vanguard FTSE Developed Markets ETF",
-          "target": 0.026525
+          "target": 0.027056
         },
         {
           "symbol": "IEFA",
           "label": "iShares Core MSCI EAFE ETF",
-          "target": 0.026525
+          "target": 0.027056
         },
         {
           "symbol": "EFA",
           "label": "iShares MSCI EAFE ETF",
-          "target": 0.019894
+          "target": 0.021645
         }
       ]
     },
@@ -118,17 +118,17 @@
         {
           "symbol": "IEMG",
           "label": "iShares Core MSCI Emerging Markets ETF",
-          "target": 0.026525
+          "target": 0.027056
         },
         {
           "symbol": "VWO",
           "label": "Vanguard FTSE Emerging Markets ETF",
-          "target": 0.026525
+          "target": 0.027056
         },
         {
           "symbol": "EEM",
           "label": "iShares MSCI Emerging Markets ETF",
-          "target": 0.019894
+          "target": 0.021645
         }
       ]
     },
@@ -140,7 +140,7 @@
         {
           "symbol": "TUR",
           "label": "iShares MSCI Turkey ETF",
-          "target": 0.019894
+          "target": 0.016234
         }
       ]
     },
@@ -152,22 +152,22 @@
         {
           "symbol": "EWJ",
           "label": "iShares MSCI Japan ETF",
-          "target": 0.013263
+          "target": 0.010823
         },
         {
           "symbol": "EWY",
           "label": "iShares MSCI South Korea ETF",
-          "target": 0.013263
+          "target": 0.010823
         },
         {
           "symbol": "MCHI",
           "label": "iShares MSCI China ETF",
-          "target": 0.013263
+          "target": 0.010823
         },
         {
           "symbol": "INDA",
           "label": "iShares MSCI India ETF",
-          "target": 0.013263
+          "target": 0.010823
         }
       ]
     },
@@ -179,22 +179,22 @@
         {
           "symbol": "EWG",
           "label": "iShares MSCI Germany ETF",
-          "target": 0.013263
+          "target": 0.010823
         },
         {
           "symbol": "EWU",
           "label": "iShares MSCI United Kingdom ETF",
-          "target": 0.013263
+          "target": 0.010823
         },
         {
           "symbol": "EWZ",
           "label": "iShares MSCI Brazil ETF",
-          "target": 0.013263
+          "target": 0.010823
         },
         {
           "symbol": "EWW",
           "label": "iShares MSCI Mexico ETF",
-          "target": 0.013263
+          "target": 0.010823
         }
       ]
     },
@@ -206,22 +206,22 @@
         {
           "symbol": "TLT",
           "label": "iShares 20+ Year Treasury Bond ETF",
-          "target": 0.026525
+          "target": 0.027056
         },
         {
           "symbol": "IEF",
           "label": "iShares 7-10 Year Treasury Bond ETF",
-          "target": 0.019894
+          "target": 0.021645
         },
         {
           "symbol": "SHY",
           "label": "iShares 1-3 Year Treasury Bond ETF",
-          "target": 0.013263
+          "target": 0.016234
         },
         {
           "symbol": "TIP",
           "label": "iShares TIPS Bond ETF",
-          "target": 0.013263
+          "target": 0.016234
         }
       ]
     },
@@ -233,22 +233,22 @@
         {
           "symbol": "LQD",
           "label": "iShares iBoxx $ Investment Grade Corporate Bond ETF",
-          "target": 0.019894
+          "target": 0.016234
         },
         {
           "symbol": "HYG",
           "label": "iShares iBoxx $ High Yield Corporate Bond ETF",
-          "target": 0.013263
+          "target": 0.016234
         },
         {
           "symbol": "EMB",
           "label": "iShares J.P. Morgan USD Emerging Markets Bond ETF",
-          "target": 0.019894
+          "target": 0.016234
         },
         {
           "symbol": "EMLC",
-          "label": "VanEck EM Local Currency Bond ETF",
-          "target": 0.013263
+          "label": "VanEck J.P. Morgan EM Local Currency Bond ETF",
+          "target": 0.010823
         }
       ]
     },
@@ -260,22 +260,22 @@
         {
           "symbol": "VNQ",
           "label": "Vanguard Real Estate ETF",
-          "target": 0.019894
+          "target": 0.016234
         },
         {
           "symbol": "GLD",
           "label": "SPDR Gold Shares",
-          "target": 0.019894
+          "target": 0.016234
         },
         {
           "symbol": "SLV",
           "label": "iShares Silver Trust",
-          "target": 0.013263
+          "target": 0.010823
         },
         {
           "symbol": "DBC",
           "label": "Invesco DB Commodity Index Tracking Fund",
-          "target": 0.013263
+          "target": 0.016234
         }
       ]
     },
@@ -287,27 +287,27 @@
         {
           "symbol": "BTC-USD",
           "label": "Bitcoin USD",
-          "target": 0.019894
+          "target": 0.021645
         },
         {
           "symbol": "ETH-USD",
           "label": "Ethereum USD",
-          "target": 0.015915
+          "target": 0.016234
         },
         {
           "symbol": "BNB-USD",
           "label": "BNB USD",
-          "target": 0.005305
+          "target": 0.005411
         },
         {
           "symbol": "XRP-USD",
           "label": "XRP USD",
-          "target": 0.005305
+          "target": 0.005411
         },
         {
           "symbol": "SOL-USD",
           "label": "Solana USD",
-          "target": 0.005305
+          "target": 0.005411
         }
       ]
     },
@@ -319,27 +319,27 @@
         {
           "symbol": "GC=F",
           "label": "Gold Futures",
-          "target": 0.01061
+          "target": 0.010823
         },
         {
           "symbol": "SI=F",
           "label": "Silver Futures",
-          "target": 0.01061
+          "target": 0.010823
         },
         {
           "symbol": "HG=F",
           "label": "Copper Futures",
-          "target": 0.007958
+          "target": 0.010823
         },
         {
           "symbol": "PL=F",
           "label": "Platinum Futures",
-          "target": 0.005305
+          "target": 0.005411
         },
         {
           "symbol": "PA=F",
           "label": "Palladium Futures",
-          "target": 0.003979
+          "target": 0.005411
         }
       ]
     },
@@ -350,28 +350,28 @@
       "items": [
         {
           "symbol": "CL=F",
-          "label": "WTI Crude Oil Futures",
-          "target": 0.01061
+          "label": "Crude Oil WTI Futures",
+          "target": 0.010823
         },
         {
           "symbol": "BZ=F",
           "label": "Brent Crude Futures",
-          "target": 0.01061
+          "target": 0.010823
         },
         {
           "symbol": "NG=F",
           "label": "Natural Gas Futures",
-          "target": 0.007958
+          "target": 0.010823
         },
         {
           "symbol": "RB=F",
           "label": "RBOB Gasoline Futures",
-          "target": 0.003979
+          "target": 0.005411
         },
         {
           "symbol": "HO=F",
           "label": "Heating Oil Futures",
-          "target": 0.003979
+          "target": 0.005411
         }
       ]
     },
@@ -383,27 +383,27 @@
         {
           "symbol": "ZC=F",
           "label": "Corn Futures",
-          "target": 0.005305
+          "target": 0.005411
         },
         {
           "symbol": "ZW=F",
           "label": "Wheat Futures",
-          "target": 0.005305
+          "target": 0.005411
         },
         {
           "symbol": "KE=F",
           "label": "KC Wheat Futures",
-          "target": 0.003979
+          "target": 0.005411
         },
         {
           "symbol": "ZO=F",
           "label": "Oats Futures",
-          "target": 0.002653
+          "target": 0.003247
         },
         {
           "symbol": "ZR=F",
           "label": "Rough Rice Futures",
-          "target": 0.002653
+          "target": 0.002165
         }
       ]
     },
@@ -415,17 +415,17 @@
         {
           "symbol": "ZS=F",
           "label": "Soybean Futures",
-          "target": 0.005305
+          "target": 0.005411
         },
         {
           "symbol": "ZM=F",
           "label": "Soybean Meal Futures",
-          "target": 0.002653
+          "target": 0.003247
         },
         {
           "symbol": "ZL=F",
           "label": "Soybean Oil Futures",
-          "target": 0.002653
+          "target": 0.003247
         }
       ]
     },
@@ -437,27 +437,27 @@
         {
           "symbol": "KC=F",
           "label": "Coffee Futures",
-          "target": 0.003979
+          "target": 0.004329
         },
         {
           "symbol": "CT=F",
           "label": "Cotton Futures",
-          "target": 0.002653
+          "target": 0.003247
         },
         {
           "symbol": "SB=F",
           "label": "Sugar Futures",
-          "target": 0.002653
+          "target": 0.003247
         },
         {
           "symbol": "CC=F",
           "label": "Cocoa Futures",
-          "target": 0.002653
+          "target": 0.003247
         },
         {
           "symbol": "OJ=F",
           "label": "Orange Juice Futures",
-          "target": 0.001326
+          "target": 0.002165
         }
       ]
     },
@@ -469,17 +469,17 @@
         {
           "symbol": "LE=F",
           "label": "Live Cattle Futures",
-          "target": 0.002653
+          "target": 0.003247
         },
         {
           "symbol": "HE=F",
           "label": "Lean Hogs Futures",
-          "target": 0.002653
+          "target": 0.003247
         },
         {
           "symbol": "GF=F",
           "label": "Feeder Cattle Futures",
-          "target": 0.001326
+          "target": 0.002165
         }
       ]
     },
