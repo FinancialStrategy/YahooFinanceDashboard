@@ -235,6 +235,47 @@
       overflow: auto;
     }
 
+    .dashboard-banner {
+      background: linear-gradient(135deg, #f7f7f7 0%, #ededed 100%);
+      border: 1px solid #d6d6d6;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+
+    .signal-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 999px;
+      border: 1px solid #bbb;
+      background: #fff;
+    }
+
+    .signal-bullish { border-color: #0a7f2e; color: #0a7f2e; }
+    .signal-neutral { border-color: #8a6200; color: #8a6200; }
+    .signal-bearish { border-color: #b30000; color: #b30000; }
+
+    .compact-table td, .compact-table th {
+      font-size: 12px;
+      padding: 8px 7px;
+    }
+
+    .mini-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12px;
+      color: #444;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -383,13 +424,14 @@
 
     <div class="tab-strip">
       <button class="tab-btn active" data-tab="overview-pane">Overview</button>
-      <button class="tab-btn" data-tab="major-world-indices-pane">Major World Indices</button>
       <button class="tab-btn" data-tab="technical-pane">Technical Analysis</button>
       <button class="tab-btn" data-tab="construction-pane">Portfolio Construction</button>
       <button class="tab-btn" data-tab="analytics-pane">Analytics</button>
       <button class="tab-btn" data-tab="risk-pane">Risk Dashboard</button>
       <button class="tab-btn" data-tab="forecast-pane">Forecast</button>
-      <button class="tab-btn" data-tab="msci-em-pane">MSCI EM & Turkey</button>
+      <button class="tab-btn" data-tab="world-indices-pane">Major World Indices</button>
+      <button class="tab-btn" data-tab="futures-pane">Futures</button>
+      <button class="tab-btn" data-tab="universe-qs-pane">QuantStats Universe</button>
     </div>
 
     <div class="content-area">
@@ -402,28 +444,6 @@
       </div>
 
       <div id="overview-pane" class="tab-pane active">
-
-        <div class="section-block" style="margin-top:14px;">
-          <div class="section-title">Selected Instruments</div>
-          <div class="small-note">
-            This table shows the exact instruments that will be sent into the construction engine after the top Asset Class filter is applied.
-          </div>
-          <div class="table-shell" style="max-height:300px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Asset Class</th>
-                  <th>Symbol</th>
-                  <th>Instrument</th>
-                  <th class="right-text">Current Weight</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="selected-instruments-body"></tbody>
-            </table>
-          </div>
-        </div>
-
         <div class="kpi-grid">
           <div class="kpi-box">
             <div class="kpi-label">Instruments Loaded</div>
@@ -484,50 +504,6 @@
       </div>
 
       
-
-      <div id="major-world-indices-pane" class="tab-pane">
-        <div class="toolbar">
-          <button id="run-major-world-indices-btn">Run Major World Indices</button>
-        </div>
-        <div class="small-note">
-          Dedicated dashboard for major developed and emerging equity benchmarks. This page separates Türkiye from the broader international index set.
-        </div>
-        <div class="kpi-grid">
-          <div class="kpi-box"><div class="kpi-label">Indices Loaded</div><div class="kpi-value" id="mwi-count">0</div></div>
-          <div class="kpi-box"><div class="kpi-label">Positive Today</div><div class="kpi-value" id="mwi-positive">0</div></div>
-          <div class="kpi-box"><div class="kpi-label">Average 30D Volatility</div><div class="kpi-value" id="mwi-vol">—</div></div>
-          <div class="kpi-box"><div class="kpi-label">Türkiye Included</div><div class="kpi-value" id="mwi-turkiye">No</div></div>
-        </div>
-        <div class="panel-box">
-          <div class="section-title">Major World Indices Overview</div>
-          <div id="major-world-indices-chart" class="medium-plot"></div>
-        </div>
-        <div class="section-block" style="margin-top:16px;">
-          <div class="section-title">Indices Table</div>
-          <div class="table-shell" style="max-height:480px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Region</th>
-                  <th>Symbol</th>
-                  <th>Index</th>
-                  <th>Price</th>
-                  <th>1D</th>
-                  <th>1W</th>
-                  <th>1M</th>
-                  <th>3M</th>
-                  <th>YTD</th>
-                  <th>1Y</th>
-                  <th>Vol 30D</th>
-                </tr>
-              </thead>
-              <tbody id="major-world-indices-body"></tbody>
-            </table>
-          </div>
-        </div>
-        <div id="major-world-indices-status" class="status-line"></div>
-      </div>
-
       <div id="technical-pane" class="tab-pane">
         <div class="toolbar">
           <label for="ta-symbol">Instrument</label>
@@ -650,8 +626,6 @@
             <option value="max_quadratic_utility">Max Quadratic Utility</option>
             <option value="efficient_risk">Efficient Risk</option>
             <option value="efficient_return">Efficient Return</option>
-            <option value="black_litterman_max_sharpe">Black-Litterman Max Sharpe</option>
-            <option value="black_litterman_min_volatility">Black-Litterman Min Volatility</option>
             <option value="hrp">Hierarchical Risk Parity</option>
             <option value="cla_max_sharpe">CLA Max Sharpe</option>
             <option value="cla_min_volatility">CLA Min Volatility</option>
@@ -678,27 +652,21 @@
         </div>
 
         <div class="section-block" style="margin-top:12px;">
-          <div class="panel-box">
-            <div class="section-title">Construction Universe Check</div>
-            <div class="small-note">The optimizer automatically uses the instruments currently visible under the top Asset Class filter. No separate instrument selector is required.</div>
-            <div id="construction-selection-summary" class="small-note"></div>
-          </div>
-        </div>
-
-        <div class="two-col" style="margin-bottom:16px;">
-          <div class="panel-box">
-            <div class="section-title">Black-Litterman Asset-Class Views</div>
-            <div class="small-note">
-              Enter the expected annual relative view for each asset class. Positive values imply an overweight view, while negative values imply an underweight view.
-            </div>
-            <div id="bl-views-container"></div>
-          </div>
-          <div class="panel-box">
-            <div class="section-title">Hard Constraint Engine</div>
-            <div class="small-note">
-              Define binding asset-class minimum and maximum weights. These values are enforced as hard constraints during optimization.
-            </div>
-            <div id="group-bounds-container"></div>
+          <div class="section-title">Selected Instruments</div>
+          <div class="small-note">These are the instruments that will be used by the construction engine for the currently selected Asset Class filter.</div>
+          <div class="table-shell" style="max-height:320px; margin-top:10px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset Class</th>
+                  <th>Symbol</th>
+                  <th>Instrument</th>
+                  <th class="right-text">Current Weight</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="selected-instruments-body"></tbody>
+            </table>
           </div>
         </div>
 
@@ -881,101 +849,6 @@
         <div id="risk-status" class="status-line"></div>
       </div>
 
-
-
-      <div id="msci-em-pane" class="tab-pane">
-        <div class="section-block">
-          <div class="section-title">MSCI Emerging Markets & Turkey Deep-Dive</div>
-          <div class="small-note">
-            Core EM benchmark ETF’leri, ülke ETF’leri ve Türkiye’nin hisse / tahvil vekil performansını ayrı ayrı analiz eder.
-          </div>
-
-          <div class="toolbar" style="margin-top:12px;">
-            <label for="em-period">Period</label>
-            <select id="em-period">
-              <option value="1y">1Y</option>
-              <option value="2y">2Y</option>
-              <option value="5y" selected>5Y</option>
-              <option value="10y">10Y</option>
-              <option value="max">MAX</option>
-            </select>
-            <button id="run-em-analysis-btn">Run EM / Turkey Analysis</button>
-          </div>
-
-          <div class="small-note" id="em-analysis-status">Hazır.</div>
-        </div>
-
-        <div class="kpi-grid">
-          <div class="kpi-box"><div class="kpi-label">EM Core ETFs</div><div class="kpi-value" id="em-core-count">—</div></div>
-          <div class="kpi-box"><div class="kpi-label">Turkey Equity Sleeve</div><div class="kpi-value" id="turkey-equity-count">—</div></div>
-          <div class="kpi-box"><div class="kpi-label">Turkey Bond Proxies</div><div class="kpi-value" id="turkey-bond-count">—</div></div>
-          <div class="kpi-box"><div class="kpi-label">Metrics Rows</div><div class="kpi-value" id="em-metrics-count">—</div></div>
-        </div>
-
-        <div class="two-col">
-          <div class="panel-box">
-            <div class="section-title">EM Core Cumulative Performance</div>
-            <div id="em-core-cumulative-chart" class="medium-plot"></div>
-          </div>
-          <div class="panel-box">
-            <div class="section-title">EM Core Rolling Volatility</div>
-            <div id="em-core-vol-chart" class="medium-plot"></div>
-          </div>
-        </div>
-
-        <div class="two-col" style="margin-top:16px;">
-          <div class="panel-box">
-            <div class="section-title">Turkey Equity vs Bond Proxy · Cumulative</div>
-            <div id="turkey-cumulative-chart" class="medium-plot"></div>
-          </div>
-          <div class="panel-box">
-            <div class="section-title">Turkey Equity vs Bond Proxy · Rolling Volatility</div>
-            <div id="turkey-vol-chart" class="medium-plot"></div>
-          </div>
-        </div>
-
-        <div class="section-block" style="margin-top:16px;">
-          <div class="section-title">MSCI Emerging Markets / Country ETF Metrics</div>
-          <div class="table-shell" style="max-height:420px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Asset Class</th>
-                  <th>Symbol</th>
-                  <th>Instrument</th>
-                  <th class="right-text">CAGR</th>
-                  <th class="right-text">Vol</th>
-                  <th class="right-text">Sharpe</th>
-                  <th class="right-text">Sortino</th>
-                  <th class="right-text">Max DD</th>
-                </tr>
-              </thead>
-              <tbody id="em-metrics-table-body"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="section-block" style="margin-top:16px;">
-          <div class="section-title">Turkey Equity vs Fixed Income Separation</div>
-          <div class="table-shell" style="max-height:320px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Sleeve</th>
-                  <th>Symbol</th>
-                  <th class="right-text">CAGR</th>
-                  <th class="right-text">Vol</th>
-                  <th class="right-text">Sharpe</th>
-                  <th class="right-text">Max DD</th>
-                </tr>
-              </thead>
-              <tbody id="turkey-split-table-body"></tbody>
-            </table>
-          </div>
-          <div class="small-note" id="turkey-split-note" style="margin-top:10px;"></div>
-        </div>
-      </div>
-
       <div id="forecast-pane" class="tab-pane">
         <div class="toolbar">
           <label for="forecast-symbol">Symbol</label>
@@ -1000,6 +873,103 @@
         </div>
 
         <div id="forecast-status" class="status-line"></div>
+      </div>
+      <div id="world-indices-pane" class="tab-pane">
+        <div class="toolbar">
+          <button id="run-world-indices-btn">Load Major World Indices</button>
+        </div>
+        <div class="small-note">
+          Separate monitoring page aligned to Yahoo Finance’s World Indices page. Focus includes the U.S., Europe, Asia, Latin America, and BIST 100 for Türkiye.
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-box"><div class="kpi-label">Indices Loaded</div><div class="kpi-value" id="world-count">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Positive Today</div><div class="kpi-value" id="world-positive">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Average 30D Volatility</div><div class="kpi-value" id="world-vol">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Best 1M Performer</div><div class="kpi-value" id="world-best-1m" style="font-size:18px;">—</div></div>
+        </div>
+        <div class="two-col-equal">
+          <div class="panel-box">
+            <div class="section-title">1M Return by Index</div>
+            <div id="world-bar-chart" class="medium-plot"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">Risk vs Return Scatter</div>
+            <div id="world-scatter-chart" class="medium-plot"></div>
+          </div>
+        </div>
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Major World Indices Table</div>
+          <div class="table-shell" style="max-height:460px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Region</th>
+                  <th>Symbol</th>
+                  <th>Index</th>
+                  <th class="right-text">Price</th>
+                  <th class="right-text">1D</th>
+                  <th class="right-text">1W</th>
+                  <th class="right-text">1M</th>
+                  <th class="right-text">3M</th>
+                  <th class="right-text">YTD</th>
+                  <th class="right-text">1Y</th>
+                  <th class="right-text">Vol 30D</th>
+                </tr>
+              </thead>
+              <tbody id="world-indices-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="world-status" class="status-line"></div>
+      </div>
+
+      <div id="futures-pane" class="tab-pane">
+        <div class="toolbar">
+          <button id="run-futures-btn">Load Futures Dashboard</button>
+        </div>
+        <div class="small-note">
+          Separate futures page aligned to Yahoo Finance’s Commodities / Futures page. Metals, energy, grains, oilseeds, softs, and livestock are split into their own buckets.
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-box"><div class="kpi-label">Contracts Loaded</div><div class="kpi-value" id="futures-count">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Positive Today</div><div class="kpi-value" id="futures-positive">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Average 30D Volatility</div><div class="kpi-value" id="futures-vol">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Best 1M Performer</div><div class="kpi-value" id="futures-best-1m" style="font-size:18px;">—</div></div>
+        </div>
+        <div class="two-col-equal">
+          <div class="panel-box">
+            <div class="section-title">1M Return by Futures Contract</div>
+            <div id="futures-bar-chart" class="medium-plot"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">Risk vs Return Scatter</div>
+            <div id="futures-scatter-chart" class="medium-plot"></div>
+          </div>
+        </div>
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Futures Table</div>
+          <div class="table-shell" style="max-height:460px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bucket</th>
+                  <th>Symbol</th>
+                  <th>Contract</th>
+                  <th class="right-text">Price</th>
+                  <th class="right-text">1D</th>
+                  <th class="right-text">1W</th>
+                  <th class="right-text">1M</th>
+                  <th class="right-text">3M</th>
+                  <th class="right-text">YTD</th>
+                  <th class="right-text">1Y</th>
+                  <th class="right-text">Vol 30D</th>
+                </tr>
+              </thead>
+              <tbody id="futures-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="futures-status" class="status-line"></div>
       </div>
     </div>
 
@@ -1263,122 +1233,24 @@
       updateWeightTotal();
       populateForecastSymbolSelector();
       renderClassTargetControls();
-      renderSelectedInstrumentsTable();
-      renderConstructionSelectionSummary();
-    }
-
-
-    function renderSelectedInstrumentsTable() {
-      const tbody = document.getElementById("selected-instruments-body");
-      if (!tbody) return;
-      tbody.innerHTML = "";
-      const rows = filteredRows();
-      if (!rows.length) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td colspan="5">No instruments available for the current asset class filter.</td>`;
-        tbody.appendChild(tr);
-        return;
-      }
-      rows.forEach(r => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${r.group || "Unknown"}</td>
-          <td>${r.symbol}</td>
-          <td class="left-text">${r.label}</td>
-          <td class="right-text">${fmtNumber(r.current_weight, 2)}%</td>
-          <td>Included</td>
-        `;
-        tbody.appendChild(tr);
-      });
-    }
-
-    function renderMajorWorldIndices(data) {
-      const rows = data.rows || [];
-      const tbody = document.getElementById("major-world-indices-body");
-      if (!tbody) return;
-      tbody.innerHTML = "";
-      rows.forEach(r => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${r.group || ""}</td>
-          <td>${r.symbol}</td>
-          <td class="left-text">${r.label}</td>
-          <td class="right-text">${fmtNumber(r.price, 2)}</td>
-          <td class="right-text">${fmtPctRaw(r.ret_1d_pct)}</td>
-          <td class="right-text">${fmtPctRaw(r.ret_1w_pct)}</td>
-          <td class="right-text">${fmtPctRaw(r.ret_1m_pct)}</td>
-          <td class="right-text">${fmtPctRaw(r.ret_3m_pct)}</td>
-          <td class="right-text">${fmtPctRaw(r.ytd_pct)}</td>
-          <td class="right-text">${fmtPctRaw(r.ret_1y_pct)}</td>
-          <td class="right-text">${fmtPctRaw(r.vol_30d_pct)}</td>
-        `;
-        tbody.appendChild(tr);
-      });
-
-      document.getElementById("mwi-count").textContent = rows.length;
-      document.getElementById("mwi-positive").textContent = rows.filter(r => Number(r.ret_1d_pct) > 0).length;
-      const avgVol = rows.filter(r => r.vol_30d_pct !== null && r.vol_30d_pct !== undefined).reduce((a,r)=>a+Number(r.vol_30d_pct||0),0) / Math.max(rows.filter(r => r.vol_30d_pct !== null && r.vol_30d_pct !== undefined).length,1);
-      document.getElementById("mwi-vol").textContent = rows.length ? `${avgVol.toFixed(2)}%` : "—";
-      document.getElementById("mwi-turkiye").textContent = rows.some(r => String(r.symbol).toUpperCase() === "XU100.IS") ? "Yes" : "No";
-
-      Plotly.newPlot("major-world-indices-chart", [{
-        x: rows.map(r => r.label),
-        y: rows.map(r => Number(r.ytd_pct || 0)),
-        type: "bar",
-        marker: { color: "#7a0019" },
-        hovertemplate: "%{x}<br>YTD: %{y:.2f}%<extra></extra>"
-      }], {
-        margin: { l: 50, r: 20, t: 20, b: 120 },
-        xaxis: { tickangle: -45, gridcolor: "#d8d8d8" },
-        yaxis: { title: "YTD Return (%)", gridcolor: "#d8d8d8" },
-        paper_bgcolor: "#f8f8f8",
-        plot_bgcolor: "#f8f8f8"
-      }, { responsive: true, displayModeBar: true });
-    }
-
-    async function runMajorWorldIndices() {
-      const btn = document.getElementById("run-major-world-indices-btn");
-      const status = document.getElementById("major-world-indices-status");
-      if (btn) { btn.disabled = true; btn.textContent = "Running..."; }
-      if (status) status.textContent = "Major World Indices analysis is running...";
-      try {
-        const res = await fetch("/api/major-world-indices");
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Major World Indices request failed");
-        renderMajorWorldIndices(data);
-        if (status) status.textContent = `Major World Indices complete · Loaded ${data.count || 0} benchmarks.`;
-      } catch (err) {
-        if (status) status.textContent = `Major World Indices error: ${err.message}`;
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = "Run Major World Indices"; }
-      }
     }
 
     async function loadUniverse() {
-      const filter = document.getElementById("group-filter");
-      const previous = filter?.value || "ALL";
-      try {
-        const res = await fetch("/api/universe");
-        const data = await res.json();
-        allGroups = (data.groups || []).map(g => g.name).filter(Boolean);
-      } catch (e) {
-        allGroups = [];
-      }
+      const res = await fetch("/api/universe");
+      const data = await res.json();
+      allGroups = data.groups.map(g => g.name);
 
-      if (filter) {
-        filter.innerHTML = `<option value="ALL">All Assets</option>`;
-        allGroups.forEach(g => {
-          const opt = document.createElement("option");
-          opt.value = g;
-          opt.textContent = g;
-          filter.appendChild(opt);
-        });
-        filter.value = allGroups.includes(previous) ? previous : "ALL";
-      }
+      const filter = document.getElementById("group-filter");
+      filter.innerHTML = `<option value="ALL">All Assets</option>`;
+
+      allGroups.forEach(g => {
+        const opt = document.createElement("option");
+        opt.value = g;
+        opt.textContent = g;
+        filter.appendChild(opt);
+      });
 
       document.getElementById("group-count").textContent = allGroups.length;
-      renderGroupViewsControls();
-      renderGroupBoundsControls();
     }
 
     async function loadSnapshot(force = false) {
@@ -1390,33 +1262,10 @@
       allRows = data.rows || [];
       applySavedWeights(allRows, previousRows);
 
-      const snapshotGroups = [...new Set((allRows || []).map(r => r.group).filter(Boolean))].sort();
-      if ((!allGroups || !allGroups.length) && snapshotGroups.length) {
-        allGroups = snapshotGroups;
-      } else {
-        allGroups = [...new Set([...(allGroups || []), ...snapshotGroups])].sort();
-      }
-
-      const filter = document.getElementById("group-filter");
-      const previous = filter?.value || "ALL";
-      if (filter) {
-        filter.innerHTML = `<option value="ALL">All Assets</option>`;
-        allGroups.forEach(g => {
-          const opt = document.createElement("option");
-          opt.value = g;
-          opt.textContent = g;
-          filter.appendChild(opt);
-        });
-        filter.value = allGroups.includes(previous) ? previous : "ALL";
-      }
-
-      document.getElementById("group-count").textContent = allGroups.length;
       document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
       buildRows(currentGroupFilter());
       populateTechnicalSymbolSelector();
       renderSelectedInstrumentsTable();
-      renderGroupViewsControls();
-      renderGroupBoundsControls();
     }
     function computeGroupTargets(rows) {
       const out = {};
@@ -1622,117 +1471,6 @@
       });
     }
 
-
-    function renderGroupViewsControls() {
-      const container = document.getElementById("bl-views-container");
-      if (!container) return;
-      const groups = (allGroups && allGroups.length ? allGroups : [...new Set((allRows || []).map(r => r.group || "Unknown"))]).sort();
-      if (!groups.length) {
-        container.innerHTML = `<div class="small-note">No asset classes available.</div>`;
-        return;
-      }
-      container.innerHTML = `
-        <div class="table-shell" style="max-height:320px;">
-          <table>
-            <thead>
-              <tr>
-                <th>Asset Class</th>
-                <th class="right-text">View (%)</th>
-                <th class="right-text">Confidence (%)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${groups.map(g => `
-                <tr>
-                  <td>${g}</td>
-                  <td class="right-text"><input type="number" step="0.5" min="-30" max="30" value="0" data-bl-view="${escapeAttr(g)}" style="width:100px;"></td>
-                  <td class="right-text"><input type="number" step="1" min="5" max="99" value="55" data-bl-confidence="${escapeAttr(g)}" style="width:100px;"></td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      `;
-    }
-
-    function renderGroupBoundsControls() {
-      const container = document.getElementById("group-bounds-container");
-      if (!container) return;
-      const groups = (allGroups && allGroups.length ? allGroups : [...new Set((allRows || []).map(r => r.group || "Unknown"))]).sort();
-      if (!groups.length) {
-        container.innerHTML = `<div class="small-note">No asset classes available.</div>`;
-        return;
-      }
-      const currentMix = computeGroupTargets(filteredRows());
-      container.innerHTML = `
-        <div class="table-shell" style="max-height:320px;">
-          <table>
-            <thead>
-              <tr>
-                <th>Asset Class</th>
-                <th class="right-text">Current %</th>
-                <th class="right-text">Min %</th>
-                <th class="right-text">Max %</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${groups.map(g => {
-                const cur = Number(currentMix[g] || 0);
-                const minv = Math.max(0, Math.min(cur * 0.6, 100));
-                const maxv = Math.max(minv, Math.min(cur * 1.4 + 5, 100));
-                return `
-                <tr>
-                  <td>${g}</td>
-                  <td class="right-text">${cur.toFixed(2)}%</td>
-                  <td class="right-text"><input type="number" step="0.5" min="0" max="100" value="${minv.toFixed(1)}" data-bound-min="${escapeAttr(g)}" style="width:90px;"></td>
-                  <td class="right-text"><input type="number" step="0.5" min="0" max="100" value="${maxv.toFixed(1)}" data-bound-max="${escapeAttr(g)}" style="width:90px;"></td>
-                </tr>`;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>
-      `;
-    }
-
-    function collectGroupViews() {
-      const views = {};
-      document.querySelectorAll("[data-bl-view]").forEach(inp => {
-        const g = inp.getAttribute("data-bl-view");
-        const v = Number(inp.value || 0);
-        if (Math.abs(v) > 1e-9) views[g] = v / 100.0;
-      });
-      return views;
-    }
-
-    function collectViewConfidences() {
-      const conf = {};
-      document.querySelectorAll("[data-bl-confidence]").forEach(inp => {
-        const g = inp.getAttribute("data-bl-confidence");
-        const v = Number(inp.value || 0);
-        if (v > 0) conf[g] = v / 100.0;
-      });
-      return conf;
-    }
-
-    function collectGroupBounds() {
-      const mins = {};
-      const maxs = {};
-      document.querySelectorAll("[data-bound-min]").forEach(inp => {
-        mins[inp.getAttribute("data-bound-min")] = (Number(inp.value || 0) / 100);
-      });
-      document.querySelectorAll("[data-bound-max]").forEach(inp => {
-        maxs[inp.getAttribute("data-bound-max")] = (Number(inp.value || 0) / 100);
-      });
-      const groups = Array.from(new Set([...Object.keys(mins), ...Object.keys(maxs)]));
-      const out = {};
-      groups.forEach(g => {
-        const mn = Math.max(0, Number(mins[g] || 0));
-        const mx = Math.min(1, Number(maxs[g] ?? 1));
-        if (mn <= mx) out[g] = { min: mn, max: mx };
-      });
-      return out;
-    }
-
     function basePayload() {
       const rows = filteredRows();
       const minW = (parseFloat(document.getElementById("min-weight")?.value) || 0) / 100;
@@ -1749,9 +1487,6 @@
         target_return: (parseFloat(document.getElementById("target-return").value) || 12) / 100,
         user_weights: userWeights,
         group_targets: (classTargetsToFractions(rows) || computeGroupTargets(rows)),
-        group_bounds: collectGroupBounds(),
-        group_views: collectGroupViews(),
-        view_confidences: collectViewConfidences(),
         min_weight: minW,
         max_weight: maxW
       };
@@ -1765,75 +1500,11 @@
         max_quadratic_utility: "Max Quadratic Utility",
         efficient_risk: "Efficient Risk",
         efficient_return: "Efficient Return",
-        black_litterman_max_sharpe: "Black-Litterman Max Sharpe",
-        black_litterman_min_volatility: "Black-Litterman Min Volatility",
         hrp: "HRP",
         cla_max_sharpe: "CLA Max Sharpe",
         cla_min_volatility: "CLA Min Volatility"
       };
       return map[v] || v;
-    }
-
-    function renderConstructionSelectionSummary() {
-      const rows = filteredRows();
-      const strategy = document.getElementById("opt-strategy")?.value || "max_sharpe";
-      const minRequired = strategy === "prior_only" ? 1 : 2;
-      const el = document.getElementById("construction-selection-summary");
-      if (!el) return;
-
-      if (!rows.length) {
-        el.innerHTML = '<span style="color:#b30000; font-weight:700;">No instruments are currently available under the selected Asset Class filter.</span>';
-        return;
-      }
-
-      const groups = [...new Set(rows.map(r => r.group || "Unknown"))];
-      const symbols = rows.map(r => `${r.symbol} (${r.label})`);
-      const preview = symbols.slice(0, 12).join(", ");
-      const extra = symbols.length > 12 ? ` ... +${symbols.length - 12} more` : "";
-      const color = rows.length >= minRequired ? '#0a7f2e' : '#8a6200';
-      const note = rows.length >= minRequired
-        ? `Ready for construction.`
-        : `The current filter leaves only ${rows.length} instrument(s). This is not enough for the selected strategy. Use All Assets or a broader Asset Class.`;
-
-      el.innerHTML = `
-        <div><strong>Selected Asset Class:</strong> ${escapeHtml(currentGroupFilter())}</div>
-        <div><strong>Visible instruments:</strong> ${rows.length}</div>
-        <div><strong>Asset classes represented:</strong> ${groups.length}</div>
-        <div><strong>Instrument set:</strong> ${escapeHtml(preview + extra)}</div>
-        <div style="margin-top:6px; color:${color}; font-weight:700;">${escapeHtml(note)}</div>
-      `;
-    }
-
-    function validateConstructionRequest() {
-      const rows = filteredRows();
-      const strategy = document.getElementById("opt-strategy")?.value || "max_sharpe";
-      const minRequired = strategy === "prior_only" ? 1 : 2;
-
-      if (!rows.length) {
-        return { ok: false, message: "No instruments are available under the selected Asset Class filter." };
-      }
-      if (rows.length < minRequired) {
-        return {
-          ok: false,
-          message: `The selected Asset Class currently has ${rows.length} instrument(s). ${strategy === "prior_only" ? "Prior-only mode requires at least 1 instrument." : "Portfolio construction requires at least 2 investable instruments after filtering."} Please switch to All Assets or choose a broader asset class.`
-        };
-      }
-
-      const positiveWeights = rows.filter(r => Number(r.current_weight || 0) > 0).length;
-      if (positiveWeights < minRequired) {
-        return {
-          ok: false,
-          message: `Only ${positiveWeights} instrument(s) have positive weights in the current universe. Assign positive weights to at least ${minRequired} instruments before running construction.`
-        };
-      }
-
-      const minW = parseFloat(document.getElementById("min-weight")?.value || "0");
-      const maxW = parseFloat(document.getElementById("max-weight")?.value || "100");
-      if (!(maxW > minW)) {
-        return { ok: false, message: "Max Weight (%) must be greater than Min Weight (%)." };
-      }
-
-      return { ok: true };
     }
 
     function renderOptimizationMetrics(data) {
@@ -2007,22 +1678,15 @@ function renderWeightsTable(data) {
 async function runOptimization() {
       const btn = document.getElementById("run-optimization-btn");
       const status = document.getElementById("construction-status");
-      const precheck = validateConstructionRequest();
-      if (!precheck.ok) {
-        status.textContent = `Construction check failed: ${precheck.message}`;
-        return;
-      }
-
       btn.disabled = true;
       btn.textContent = "Running...";
       status.textContent = `Portfolio construction is running for asset class: ${currentGroupFilter()}`;
 
       try {
-        const payload = basePayload();
         const res = await fetch("/api/optimization", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(basePayload())
         });
 
         const data = await res.json();
@@ -2034,11 +1698,8 @@ async function runOptimization() {
         renderWeightsBar(data);
         renderAllocationDonut(data);
         renderWeightsTable(data);
-        renderGroupWeights(data.group_prior_weights || [], data.group_optimized_weights || []);
 
-        const usedBounds = Object.keys(payload.group_bounds || {}).length;
-        const usedViews = Object.keys(payload.group_views || {}).length;
-        status.textContent = `Construction complete · Asset class: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length} · Bounds used: ${usedBounds} · Views used: ${usedViews}`;
+        status.textContent = `Construction complete · Asset class: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length}`;
       } catch (err) {
         status.textContent = `Construction error: ${err.message}`;
       } finally {
@@ -2563,28 +2224,296 @@ async function runOptimization() {
       updateWeightTotal();
       populateForecastSymbolSelector();
       populateTechnicalSymbolSelector();
-      renderGroupViewsControls();
-      renderGroupBoundsControls();
+      renderSelectedInstrumentsTable();
     });
 
     document.getElementById("refresh-btn").addEventListener("click", async () => {
       await loadSnapshot(true);
     });
 
-    document.getElementById("opt-strategy").addEventListener("change", renderConstructionSelectionSummary);
     document.getElementById("run-optimization-btn").addEventListener("click", runOptimization);
     document.getElementById("run-analytics-btn").addEventListener("click", runAnalytics);
     document.getElementById("run-risk-btn").addEventListener("click", runRisk);
     document.getElementById("run-forecast-btn").addEventListener("click", runForecast);
+    function fmtNum(x, digits=2) {
+      const v = Number(x);
+      return Number.isFinite(v) ? v.toFixed(digits) : "—";
+    }
+
+    function fmtPct1(x) {
+      const v = Number(x);
+      return Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : "—";
+    }
+
+    function signalBadge(signal) {
+      const s = signal || "Neutral";
+      const cls = s === "Bullish" ? "signal-bullish" : s === "Bearish" ? "signal-bearish" : "signal-neutral";
+      return `<span class="signal-badge ${cls}">${s}</span>`;
+    }
+
+    function renderMiniList(elId, rows, metric) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.innerHTML = (rows || []).slice(0, 5).map(r => `<li><strong>${r.symbol}</strong> <span style="color:#666;">(${r.group || ""})</span> — ${metric(r)}</li>`).join("");
+    }
+
+    function renderUniverseQuantTable(rows) {
+      const tbody = document.getElementById("qs-universe-body");
+      tbody.innerHTML = (rows || []).map(r => `
+        <tr>
+          <td>${r.symbol || ""}</td>
+          <td class="left-text">${r.label || ""}</td>
+          <td>${r.group || ""}</td>
+          <td>${signalBadge(r.signal)}</td>
+          <td>${fmtNum(r.trend_score, 0)}</td>
+          <td class="right-text">${fmtPct1(r.cagr)}</td>
+          <td class="right-text">${fmtPct1(r.volatility)}</td>
+          <td class="right-text">${fmtNum(r.sharpe)}</td>
+          <td class="right-text">${fmtNum(r.sortino)}</td>
+          <td class="right-text">${fmtPct1(r.max_drawdown)}</td>
+          <td class="right-text">${fmtPct1(r.win_rate)}</td>
+          <td class="right-text">${fmtPct1(r.ret_1m)}</td>
+          <td class="right-text">${fmtPct1(r.ret_3m)}</td>
+          <td class="right-text">${fmtPct1(r.ret_1y)}</td>
+          <td class="right-text">${fmtNum(r.rsi14)}</td>
+          <td class="right-text">${fmtNum(r.macd_hist, 4)}</td>
+          <td class="right-text">${fmtPct1(r.dist_sma20)}</td>
+          <td class="right-text">${fmtPct1(r.dist_sma50)}</td>
+          <td class="right-text">${fmtPct1(r.dist_sma200)}</td>
+          <td class="right-text">${fmtPct1(r.rolling_vol_20)}</td>
+          <td class="right-text">${fmtPct1(r.rolling_vol_63)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderUniverseScatter(rows) {
+      const valid = (rows || []).filter(r => Number.isFinite(Number(r.volatility)) && Number.isFinite(Number(r.cagr)));
+      const bySignal = { Bullish: [], Neutral: [], Bearish: [] };
+      valid.forEach(r => {
+        const key = ["Bullish", "Neutral", "Bearish"].includes(r.signal) ? r.signal : "Neutral";
+        bySignal[key].push(r);
+      });
+      const traces = Object.keys(bySignal).map(sig => ({
+        type: "scatter",
+        mode: "markers",
+        name: sig,
+        x: bySignal[sig].map(r => r.volatility * 100),
+        y: bySignal[sig].map(r => r.cagr * 100),
+        text: bySignal[sig].map(r => `${r.symbol}<br>${r.label}<br>Sharpe: ${fmtNum(r.sharpe)}<br>Trend: ${fmtNum(r.trend_score,0)}`),
+        hovertemplate: "%{text}<extra></extra>",
+        marker: { size: bySignal[sig].map(r => Math.max(10, 10 + (Number.isFinite(Number(r.sharpe)) ? Number(r.sharpe) * 4 : 0))) }
+      }));
+      Plotly.newPlot("qs-scatter-chart", traces, {
+        margin: { t: 30, r: 20, b: 55, l: 60 },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8",
+        xaxis: { title: "Annualized Volatility (%)", gridcolor: "#e1e1e1" },
+        yaxis: { title: "CAGR (%)", gridcolor: "#e1e1e1" },
+        legend: { orientation: "h" }
+      }, {responsive:true});
+    }
+
+    async function runUniverseQuantStats() {
+      const btn = document.getElementById("run-universe-qs-btn");
+      const status = document.getElementById("qs-status");
+      try {
+        btn.disabled = true;
+        status.textContent = "Running QuantStats universe scan...";
+        const res = await fetch("/api/universe-analytics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ period: document.getElementById("qs-period").value })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Universe quant scan failed");
+
+        document.getElementById("qs-kpi-count").textContent = fmtNum(data.summary?.instrument_count, 0);
+        document.getElementById("qs-kpi-sharpe").textContent = fmtNum(data.summary?.avg_sharpe);
+        document.getElementById("qs-kpi-cagr").textContent = fmtPct1(data.summary?.avg_cagr);
+        document.getElementById("qs-kpi-vol").textContent = fmtPct1(data.summary?.avg_volatility);
+        document.getElementById("qs-kpi-bull").textContent = fmtNum(data.summary?.bullish_count, 0);
+        document.getElementById("qs-kpi-neutral").textContent = fmtNum(data.summary?.neutral_count, 0);
+        document.getElementById("qs-kpi-bear").textContent = fmtNum(data.summary?.bearish_count, 0);
+
+        renderMiniList("qs-top-sharpe", data.leaders?.top_sharpe || [], r => `Sharpe ${fmtNum(r.sharpe)}`);
+        renderMiniList("qs-top-cagr", data.leaders?.top_cagr || [], r => `CAGR ${fmtPct1(r.cagr)}`);
+        renderMiniList("qs-low-dd", data.leaders?.lowest_drawdown || [], r => `Max DD ${fmtPct1(r.max_drawdown)}`);
+        renderMiniList("qs-top-trend", data.leaders?.top_trend || [], r => `Trend ${fmtNum(r.trend_score,0)} • ${r.signal || ""}`);
+        renderUniverseScatter(data.rows || []);
+        renderUniverseQuantTable(data.rows || []);
+        status.textContent = `Universe scan completed. ${fmtNum(data.summary?.instrument_count,0)} instruments processed. Generated at ${data.generated_at || ""}.`;
+      } catch (err) {
+        status.textContent = `Universe scan failed: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+
+    function renderSelectedInstrumentsTable() {
+      const tbody = document.getElementById("selected-instruments-body");
+      if (!tbody) return;
+      const rows = filteredRows();
+      tbody.innerHTML = (rows || []).map(r => `
+        <tr>
+          <td>${r.group || ""}</td>
+          <td>${r.symbol || ""}</td>
+          <td class="left-text">${r.label || ""}</td>
+          <td class="right-text">${fmtNumber(r.current_weight, 2)}%</td>
+          <td>Included</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderWorldIndices(data) {
+      const rows = data.rows || [];
+      document.getElementById("world-count").textContent = fmtNumber(rows.length, 0);
+      document.getElementById("world-positive").textContent = fmtNumber(rows.filter(r => Number(r.ret_1d_pct) > 0).length, 0);
+      const vols = rows.map(r => Number(r.vol_30d_pct)).filter(Number.isFinite);
+      document.getElementById("world-vol").textContent = vols.length ? `${(vols.reduce((a,b)=>a+b,0)/vols.length).toFixed(2)}%` : "—";
+      const best = rows.slice().sort((a,b)=>(Number(b.ret_1m_pct)||-1e9)-(Number(a.ret_1m_pct)||-1e9))[0];
+      document.getElementById("world-best-1m").textContent = best ? `${best.label} (${fmtPctRaw(best.ret_1m_pct)})` : "—";
+
+      document.getElementById("world-indices-body").innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.group || ""}</td>
+          <td>${r.symbol || ""}</td>
+          <td class="left-text">${r.label || ""}</td>
+          <td class="right-text">${fmtNumber(r.price)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1d_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1w_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_3m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ytd_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1y_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.vol_30d_pct)}</td>
+        </tr>
+      `).join("");
+
+      Plotly.newPlot("world-bar-chart", [{
+        type:"bar",
+        x: rows.map(r => r.label),
+        y: rows.map(r => Number(r.ret_1m_pct)),
+        hovertemplate: "%{x}<br>1M Return: %{y:.2f}%<extra></extra>"
+      }], {
+        margin:{t:30,r:20,b:120,l:60},
+        xaxis:{tickangle:-45},
+        yaxis:{title:"1M Return (%)", gridcolor:"#e1e1e1"},
+        paper_bgcolor:"#f8f8f8", plot_bgcolor:"#f8f8f8"
+      }, {responsive:true});
+
+      Plotly.newPlot("world-scatter-chart", [{
+        type:"scatter", mode:"markers+text",
+        x: rows.map(r => Number(r.vol_30d_pct)),
+        y: rows.map(r => Number(r.ret_1y_pct)),
+        text: rows.map(r => r.symbol),
+        textposition:"top center",
+        hovertemplate: "%{text}<br>Vol 30D: %{x:.2f}%<br>1Y Return: %{y:.2f}%<extra></extra>",
+        marker:{size:12}
+      }], {
+        margin:{t:30,r:20,b:55,l:60},
+        xaxis:{title:"Vol 30D (%)", gridcolor:"#e1e1e1"},
+        yaxis:{title:"1Y Return (%)", gridcolor:"#e1e1e1"},
+        paper_bgcolor:"#f8f8f8", plot_bgcolor:"#f8f8f8"
+      }, {responsive:true});
+    }
+
+    async function runWorldIndices() {
+      const status = document.getElementById("world-status");
+      status.textContent = "Loading major world indices...";
+      try {
+        const res = await fetch("/api/major-world-indices");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "World indices request failed");
+        renderWorldIndices(data);
+        status.textContent = `Major world indices loaded · ${rowsToCount(data.rows)} instruments.`;
+      } catch (err) {
+        status.textContent = `Major world indices error: ${err.message}`;
+      }
+    }
+
+    function renderFutures(data) {
+      const rows = data.rows || [];
+      document.getElementById("futures-count").textContent = fmtNumber(rows.length, 0);
+      document.getElementById("futures-positive").textContent = fmtNumber(rows.filter(r => Number(r.ret_1d_pct) > 0).length, 0);
+      const vols = rows.map(r => Number(r.vol_30d_pct)).filter(Number.isFinite);
+      document.getElementById("futures-vol").textContent = vols.length ? `${(vols.reduce((a,b)=>a+b,0)/vols.length).toFixed(2)}%` : "—";
+      const best = rows.slice().sort((a,b)=>(Number(b.ret_1m_pct)||-1e9)-(Number(a.ret_1m_pct)||-1e9))[0];
+      document.getElementById("futures-best-1m").textContent = best ? `${best.label} (${fmtPctRaw(best.ret_1m_pct)})` : "—";
+
+      document.getElementById("futures-body").innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.group || ""}</td>
+          <td>${r.symbol || ""}</td>
+          <td class="left-text">${r.label || ""}</td>
+          <td class="right-text">${fmtNumber(r.price)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1d_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1w_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_3m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ytd_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1y_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.vol_30d_pct)}</td>
+        </tr>
+      `).join("");
+
+      Plotly.newPlot("futures-bar-chart", [{
+        type:"bar",
+        x: rows.map(r => r.label),
+        y: rows.map(r => Number(r.ret_1m_pct)),
+        hovertemplate: "%{x}<br>1M Return: %{y:.2f}%<extra></extra>"
+      }], {
+        margin:{t:30,r:20,b:130,l:60},
+        xaxis:{tickangle:-45},
+        yaxis:{title:"1M Return (%)", gridcolor:"#e1e1e1"},
+        paper_bgcolor:"#f8f8f8", plot_bgcolor:"#f8f8f8"
+      }, {responsive:true});
+
+      Plotly.newPlot("futures-scatter-chart", [{
+        type:"scatter", mode:"markers+text",
+        x: rows.map(r => Number(r.vol_30d_pct)),
+        y: rows.map(r => Number(r.ret_1y_pct)),
+        text: rows.map(r => r.symbol),
+        textposition:"top center",
+        hovertemplate: "%{text}<br>Vol 30D: %{x:.2f}%<br>1Y Return: %{y:.2f}%<extra></extra>",
+        marker:{size:12}
+      }], {
+        margin:{t:30,r:20,b:55,l:60},
+        xaxis:{title:"Vol 30D (%)", gridcolor:"#e1e1e1"},
+        yaxis:{title:"1Y Return (%)", gridcolor:"#e1e1e1"},
+        paper_bgcolor:"#f8f8f8", plot_bgcolor:"#f8f8f8"
+      }, {responsive:true});
+    }
+
+    function rowsToCount(rows) { return Array.isArray(rows) ? rows.length : 0; }
+
+    async function runFuturesDashboard() {
+      const status = document.getElementById("futures-status");
+      status.textContent = "Loading futures dashboard...";
+      try {
+        const res = await fetch("/api/futures-dashboard");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Futures dashboard request failed");
+        renderFutures(data);
+        status.textContent = `Futures dashboard loaded · ${rowsToCount(data.rows)} contracts.`;
+      } catch (err) {
+        status.textContent = `Futures dashboard error: ${err.message}`;
+      }
+    }
+
     document.getElementById("run-ta-btn").addEventListener("click", runTechnicalAnalysis);
-    const mwiBtn = document.getElementById("run-major-world-indices-btn"); if (mwiBtn) mwiBtn.addEventListener("click", runMajorWorldIndices);
+    document.getElementById("run-universe-qs-btn").addEventListener("click", runUniverseQuantStats);
+    document.getElementById("run-world-indices-btn").addEventListener("click", runWorldIndices);
+    document.getElementById("run-futures-btn").addEventListener("click", runFuturesDashboard);
 
     (async function init() {
       setupTabs();
       attachClassTargetButtons();
       await loadUniverse();
       await loadSnapshot(false);
-      await runMajorWorldIndices();
+      renderSelectedInstrumentsTable();
+      await runWorldIndices();
+      await runFuturesDashboard();
     })();
   </script>
 
@@ -2703,60 +2632,6 @@ function computeFeasibility() {
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("checkFeasibility");
   if (btn) btn.addEventListener("click", (e)=>{ e.preventDefault(); computeFeasibility(); });
-});
-</script>
-
-
-<script>
-function plotMultiSeries(containerId, seriesMap, field, titleY) {
-  const traces = Object.keys(seriesMap || {}).map(sym => ({
-    x: (seriesMap[sym][field] || []).map(r => r.date),
-    y: (seriesMap[sym][field] || []).map(r => r.value),
-    type: "scatter", mode: "lines", name: `${sym} — ${seriesMap[sym].label || sym}`
-  }));
-  Plotly.newPlot(containerId, traces, {margin:{l:60,r:25,t:20,b:50}, xaxis:{title:"Date",gridcolor:"#d8d8d8"}, yaxis:{title:titleY,gridcolor:"#d8d8d8"}, paper_bgcolor:"#f8f8f8", plot_bgcolor:"#f8f8f8", legend:{orientation:"h"}}, {responsive:true, displayModeBar:true});
-}
-function renderEmMetricsTable(rows) {
-  const tbody = document.getElementById("em-metrics-table-body"); if (!tbody) return; tbody.innerHTML = "";
-  (rows || []).forEach(row => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${row.group || "Unknown"}</td><td>${row.symbol}</td><td class="left-text">${row.label || row.symbol}</td><td class="right-text">${fmtPctDecimal(row.cagr || 0)}</td><td class="right-text">${fmtPctDecimal(row.volatility || 0)}</td><td class="right-text">${fmtNumber(row.sharpe)}</td><td class="right-text">${fmtNumber(row.sortino)}</td><td class="right-text">${fmtPctDecimal(row.max_drawdown || 0)}</td>`;
-    tbody.appendChild(tr);
-  });
-}
-function renderTurkeySplitTable(equityRows, bondRows, notes) {
-  const tbody = document.getElementById("turkey-split-table-body"); if (!tbody) return; tbody.innerHTML = "";
-  const appendRows = (rows, sleeve) => { (rows || []).forEach(row => { const m = row.metrics || {}; const tr = document.createElement("tr"); tr.innerHTML = `<td>${sleeve}</td><td>${row.symbol}</td><td class="right-text">${fmtPctDecimal(m.cagr || 0)}</td><td class="right-text">${fmtPctDecimal(m.volatility || 0)}</td><td class="right-text">${fmtNumber(m.sharpe)}</td><td class="right-text">${fmtPctDecimal(m.max_drawdown || 0)}</td>`; tbody.appendChild(tr); }); };
-  appendRows(equityRows, "Turkey Equity"); appendRows(bondRows, "Turkey Bond Proxy");
-  const note = document.getElementById("turkey-split-note"); if (note) note.textContent = (notes || []).join(" ");
-}
-async function runMsciEmAnalysis() {
-  const status = document.getElementById("em-analysis-status"); const btn = document.getElementById("run-em-analysis-btn");
-  if (!status || !btn) return;
-  btn.disabled = true; btn.textContent = "Running..."; status.textContent = "MSCI EM / Turkey analysis is running...";
-  try {
-    const payload = { period: document.getElementById("em-period")?.value || "5y" };
-    const res = await fetch("/api/msci-em-analysis", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
-    const data = await res.json(); if (!res.ok) throw new Error(data.detail || "MSCI EM analysis failed");
-    document.getElementById("em-core-count").textContent = String((data.em_core_symbols || []).length);
-    document.getElementById("turkey-equity-count").textContent = String((data.turkey_equity_symbols || []).length);
-    document.getElementById("turkey-bond-count").textContent = String((data.turkey_bond_proxy_symbols || []).length);
-    document.getElementById("em-metrics-count").textContent = String((data.metrics_table || []).length);
-    plotMultiSeries("em-core-cumulative-chart", data.em_core_charts || {}, "cumulative", "Cumulative Growth");
-    plotMultiSeries("em-core-vol-chart", data.em_core_charts || {}, "rolling_vol", "Rolling Volatility");
-    const turkeyMap = {};
-    (data.turkey_equity || []).forEach(row => { turkeyMap[row.symbol] = { label: row.symbol, cumulative: row.cumulative || [], rolling_vol: row.rolling_vol || [] }; });
-    (data.turkey_bond_proxies || []).forEach(row => { turkeyMap[row.symbol] = { label: row.symbol, cumulative: row.cumulative || [], rolling_vol: row.rolling_vol || [] }; });
-    plotMultiSeries("turkey-cumulative-chart", turkeyMap, "cumulative", "Cumulative Growth");
-    plotMultiSeries("turkey-vol-chart", turkeyMap, "rolling_vol", "Rolling Volatility");
-    renderEmMetricsTable(data.metrics_table || []);
-    renderTurkeySplitTable(data.turkey_equity || [], data.turkey_bond_proxies || [], data.notes || []);
-    status.textContent = `MSCI EM / Turkey analysis complete · Period: ${data.period}`;
-  } catch (err) { status.textContent = `MSCI EM / Turkey analysis error: ${err.message}`; }
-  finally { btn.disabled = false; btn.textContent = "Run EM / Turkey Analysis"; }
-}
-document.addEventListener("DOMContentLoaded", () => {
-  const emBtn = document.getElementById("run-em-analysis-btn"); if (emBtn) emBtn.addEventListener("click", runMsciEmAnalysis);
 });
 </script>
 
