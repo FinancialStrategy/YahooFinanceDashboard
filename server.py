@@ -27,10 +27,6 @@ from pypfopt import EfficientFrontier, expected_returns, risk_models
 from pypfopt import objective_functions
 from pypfopt.hierarchical_portfolio import HRPOpt
 from pypfopt.cla import CLA
-try:
-    from pypfopt import black_litterman
-except Exception:
-    black_litterman = None
 
 warnings.filterwarnings("ignore")
 
@@ -44,38 +40,12 @@ if not INDEX_FILE.exists():
     if alt.exists():
         INDEX_FILE = alt
 UNIVERSE_FILE = BASE_DIR / "universe.json"
-if not UNIVERSE_FILE.exists():
-    alt_universe = BASE_DIR / "universe_institutional_etf.json"
-    if alt_universe.exists():
-        UNIVERSE_FILE = alt_universe
 
 app = FastAPI(title="Institutional Quant Platform")
 
 RISK_FREE_RATE = 0.035
 BENCHMARK_SYMBOL = "^GSPC"
 TRADING_DAYS = 252
-
-MAJOR_WORLD_INDICES = [
-    {"symbol": "^GSPC", "label": "S&P 500", "group": "North America"},
-    {"symbol": "^DJI", "label": "Dow Jones Industrial Average", "group": "North America"},
-    {"symbol": "^IXIC", "label": "NASDAQ Composite", "group": "North America"},
-    {"symbol": "^RUT", "label": "Russell 2000", "group": "North America"},
-    {"symbol": "^FTSE", "label": "FTSE 100", "group": "Europe"},
-    {"symbol": "^GDAXI", "label": "DAX", "group": "Europe"},
-    {"symbol": "^FCHI", "label": "CAC 40", "group": "Europe"},
-    {"symbol": "^STOXX50E", "label": "EURO STOXX 50", "group": "Europe"},
-    {"symbol": "^N225", "label": "Nikkei 225", "group": "Asia Pacific"},
-    {"symbol": "^HSI", "label": "Hang Seng Index", "group": "Asia Pacific"},
-    {"symbol": "000001.SS", "label": "Shanghai Composite", "group": "Asia Pacific"},
-    {"symbol": "^AXJO", "label": "S&P/ASX 200", "group": "Asia Pacific"},
-    {"symbol": "^BSESN", "label": "BSE SENSEX", "group": "Asia Pacific"},
-    {"symbol": "^BVSP", "label": "Ibovespa", "group": "Latin America"},
-    {"symbol": "^MXX", "label": "IPC Mexico", "group": "Latin America"},
-    {"symbol": "XU100.IS", "label": "BIST 100", "group": "Türkiye"}
-]
-EM_BENCHMARK_SYMBOLS = ["EEM", "IEMG", "VWO", "SPEM"]
-TURKEY_EQUITY_SYMBOLS = ["TUR"]
-TURKEY_BOND_PROXY_SYMBOLS = ["EMB", "EMLC", "EMHY", "EMBX", "LEMB"]
 
 CACHE = {
     "snapshot": None,
@@ -292,7 +262,7 @@ def download_price_matrix(symbols, period="2y", interval="1d"):
     close_df = close_df.dropna(axis=1, thresh=min_obs)
     close_df = close_df.sort_index().ffill().dropna()
 
-    if close_df.shape[1] < 1:
+    if close_df.shape[1] < 3:
         raise RuntimeError("Not enough valid symbols after cleaning")
 
     return close_df
@@ -369,54 +339,6 @@ def build_snapshot():
     }
 
 
-
-def build_market_snapshot(items, period="2y"):
-    symbols = [x["symbol"] for x in items]
-    df = yf.download(
-        tickers=symbols,
-        period=period,
-        interval="1d",
-        auto_adjust=True,
-        progress=False,
-        threads=True,
-        group_by="ticker"
-    )
-    if df.empty:
-        raise RuntimeError("Yahoo Finance returned empty dataset for market snapshot")
-    result_rows = []
-    for item in items:
-        symbol = item["symbol"]
-        try:
-            sdf = extract_symbol_frame(df, symbol, len(symbols)).copy().dropna(how="all")
-            if sdf.empty or "Close" not in sdf.columns:
-                continue
-            close = sdf["Close"].dropna()
-            if len(close) < 2:
-                continue
-            last_price = float(close.iloc[-1])
-            prev_close = float(close.iloc[-2])
-            row = {
-                "group": item.get("group", "Market"),
-                "symbol": symbol,
-                "label": item.get("label", symbol),
-                "price": last_price,
-                "ret_1d_pct": ((last_price / prev_close) - 1.0) * 100.0 if prev_close != 0 else None,
-                "ret_1w_pct": safe_pct_return(close, 5),
-                "ret_1m_pct": safe_pct_return(close, 21),
-                "ret_3m_pct": safe_pct_return(close, 63),
-                "ytd_pct": ytd_return(close),
-                "ret_1y_pct": safe_pct_return(close, 252),
-                "vol_30d_pct": annualized_volatility(close, 30)
-            }
-            result_rows.append(row)
-        except Exception:
-            continue
-    return {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
-        "count": len(result_rows),
-        "rows": result_rows
-    }
-
 def clean_weight_dict(weights: dict):
     out = {}
     for k, v in weights.items():
@@ -426,178 +348,39 @@ def clean_weight_dict(weights: dict):
     return dict(sorted(out.items(), key=lambda x: x[1], reverse=True))
 
 
-
-def build_frontier_points(mu, cov_matrix, weight_bounds=(0, 1)):
+def build_frontier_points(mu, cov_matrix):
     points = []
+
     try:
-        ef_min = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
+        ef_min = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
         ef_min.min_volatility()
-        min_ret, min_vol, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        min_ret, _, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
     except Exception:
         return points
 
-    try:
-        ef_max = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
-        ef_max.max_sharpe(risk_free_rate=RISK_FREE_RATE)
-        max_ret, _, _ = ef_max.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-    except Exception:
-        max_ret = min_ret
+def optimize_with_strategy(prices, strategy, target_volatility, target_return, prior_weights=None, group_targets=None, min_weight=0.0, max_weight=1.0, group_map=None):
+    mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
+    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
+    rets = expected_returns.returns_from_prices(prices)
 
-    if max_ret < min_ret:
-        min_ret, max_ret = max_ret, min_ret
+    # Prior weights (optional)
+    symbols = list(prices.columns)
+    if group_map is None:
+        group_map = symbol_group_map()
+    if prior_weights is not None:
+        prior_weights = normalize_weight_dict(prior_weights, symbols)
 
-    grid = np.linspace(float(min_ret), float(max_ret), 20)
-    for tr in grid:
-        try:
-            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
-            ef.efficient_return(float(tr))
-            ret, vol, shp = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-            points.append({
-                "expected_return": float(ret),
-                "volatility": float(vol),
-                "sharpe": float(shp)
-            })
-        except Exception:
-            continue
-
-    if not points:
-        try:
-            points.append({
-                "expected_return": float(min_ret),
-                "volatility": float(min_vol),
-                "sharpe": float((min_ret - RISK_FREE_RATE) / min_vol) if min_vol > 0 else 0.0
-            })
-        except Exception:
-            pass
-    return points
-
-
-def _normalize_group_targets(group_targets):
+    # Group targets (optional) - normalize to sum to 1
     if isinstance(group_targets, dict) and len(group_targets) > 0:
         gt = {str(k): float(v) for k, v in group_targets.items()}
         mx = max(gt.values()) if gt else 0.0
         if mx > 1.5:
-            gt = {k: v / 100.0 for k, v in gt.items()}
+            gt = {k: v/100.0 for k, v in gt.items()}
         tot = sum(max(v, 0.0) for v in gt.values())
         if tot > 0:
-            return {k: max(v, 0.0) / tot for k, v in gt.items()}
-    return None
-
-
-def _normalize_group_bounds(group_bounds):
-    out = {}
-    if not isinstance(group_bounds, dict):
-        return out
-    for g, cfg in group_bounds.items():
-        if not isinstance(cfg, dict):
-            continue
-        mn = float(cfg.get("min", 0.0) or 0.0)
-        mx = float(cfg.get("max", 1.0) or 1.0)
-        if mx > 1.5:
-            mx /= 100.0
-        if mn > 1.5:
-            mn /= 100.0
-        mn = max(0.0, mn)
-        mx = min(1.0, mx)
-        if mn <= mx:
-            out[str(g)] = {"min": mn, "max": mx}
-    return out
-
-
-def _group_to_symbol_view(group_views, group_map, symbols):
-    if not isinstance(group_views, dict):
-        return {}
-    symbol_views = {}
-    for g, view in group_views.items():
-        try:
-            val = float(view)
-        except Exception:
-            continue
-        members = [s for s in symbols if group_map.get(s, "Unknown") == g]
-        if not members:
-            continue
-        per_symbol = val / len(members)
-        for s in members:
-            symbol_views[s] = symbol_views.get(s, 0.0) + per_symbol
-    return symbol_views
-
-
-def _apply_group_constraints(ef, symbols, group_map, group_targets=None, group_bounds=None):
-    if cp is None:
-        return ef
-    if group_targets:
-        for g, tgt in group_targets.items():
-            idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-            if idxs:
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
-    for g, bounds in (group_bounds or {}).items():
-        idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-        if not idxs:
-            continue
-        mn = float(bounds.get("min", 0.0))
-        mx = float(bounds.get("max", 1.0))
-        ef.add_constraint(lambda w, idxs=idxs, mn=mn: cp.sum(w[idxs]) >= mn)
-        ef.add_constraint(lambda w, idxs=idxs, mx=mx: cp.sum(w[idxs]) <= mx)
-    return ef
-
-
-def _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=None, view_confidences=None):
-    base_mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
-    if black_litterman is None or not group_views:
-        return base_mu
-
-    abs_views = _group_to_symbol_view(group_views, group_map, symbols)
-    if not abs_views:
-        return base_mu
-
-    try:
-        market_prior = black_litterman.market_implied_prior_returns(
-            market_caps={s: 1.0 for s in symbols},
-            risk_aversion=2.5,
-            cov_matrix=cov_matrix
-        )
-    except Exception:
-        market_prior = base_mu
-
-    conf_list = []
-    for s in abs_views.keys():
-        g = group_map.get(s, "Unknown")
-        c = None if not isinstance(view_confidences, dict) else view_confidences.get(g)
-        try:
-            c = float(c)
-        except Exception:
-            c = 0.5
-        if c > 1:
-            c = c / 100.0
-        conf_list.append(min(max(c, 0.05), 0.99))
-
-    try:
-        bl = black_litterman.BlackLittermanModel(
-            cov_matrix,
-            pi=market_prior,
-            absolute_views=abs_views,
-            view_confidences=np.array(conf_list, dtype=float)
-        )
-        posterior = bl.bl_returns()
-        return posterior.reindex(base_mu.index).fillna(base_mu)
-    except Exception:
-        return base_mu
-
-def optimize_with_strategy(prices, strategy, target_volatility, target_return, prior_weights=None, group_targets=None, min_weight=0.0, max_weight=1.0, group_map=None, group_bounds=None, group_views=None, view_confidences=None):
-    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
-    symbols = list(prices.columns)
-    if group_map is None:
-        group_map = symbol_group_map()
-    mu = _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=group_views, view_confidences=view_confidences) if strategy.startswith("black_litterman") else expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
-    rets = expected_returns.returns_from_prices(prices)
-
-    # Prior weights (optional)
-    if prior_weights is not None:
-        prior_weights = normalize_weight_dict(prior_weights, symbols)
-
-    # Group targets / bounds (optional)
-    group_targets = _normalize_group_targets(group_targets)
-    group_bounds = _normalize_group_bounds(group_bounds)
+            group_targets = {k: max(v, 0.0)/tot for k, v in gt.items()}
+        else:
+            group_targets = None
 
     # A special mode: use prior weights as the portfolio (no optimization)
     if strategy == "prior_only":
@@ -616,7 +399,13 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     if strategy == "max_sharpe":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -624,7 +413,13 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "min_volatility":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.min_volatility()
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -632,7 +427,13 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "max_quadratic_utility":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.max_quadratic_utility(risk_aversion=1.0)
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -640,7 +441,13 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "efficient_risk":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.efficient_risk(target_volatility=float(target_volatility))
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -648,22 +455,14 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "efficient_return":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
+        if group_targets and cp is not None:
+            # enforce asset-class allocations as hard constraints
+            for g, tgt in group_targets.items():
+                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+                if len(idxs) == 0:
+                    continue
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
         ef.efficient_return(target_return=float(target_return))
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "black_litterman_max_sharpe":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "black_litterman_min_volatility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.min_volatility()
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
@@ -712,15 +511,10 @@ def build_portfolio_context(payload):
     target_volatility = float(payload.get("target_volatility", 0.15))
     target_return = float(payload.get("target_return", 0.10))
     symbols = resolve_symbols(payload)
-    if not symbols:
-        raise RuntimeError("No instruments matched the selected Asset Class filter.")
 
     # Prior weights (from UI) and asset-class targets (optional)
     prior_weights_input = payload.get("user_weights") or payload.get("prior_weights") or {}
     group_targets_input = payload.get("group_targets") or {}
-    group_bounds_input = payload.get("group_bounds") or {}
-    group_views_input = payload.get("group_views") or {}
-    view_confidences_input = payload.get("view_confidences") or {}
     min_weight = float(payload.get("min_weight", 0.0))
     max_weight = float(payload.get("max_weight", 1.0))
     if max_weight <= 0 or max_weight > 1:
@@ -737,9 +531,7 @@ def build_portfolio_context(payload):
         group_targets_input = tmp.groupby(tmp.index).sum().to_dict()
 
     if len(symbols) < 3:
-        min_required_assets = 1 if strategy == "prior_only" else 2
-    if len(symbols) < min_required_assets:
-        raise RuntimeError(f"The selected asset-class universe contains only {len(symbols)} instrument(s). {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering.'}")
+        raise RuntimeError("At least 3 assets are required for portfolio construction")
 
     labels = label_map()
     price_symbols = symbols + [BENCHMARK_SYMBOL]
@@ -751,8 +543,8 @@ def build_portfolio_context(payload):
     benchmark_prices = price_df[BENCHMARK_SYMBOL].copy()
     prices = price_df.drop(columns=[BENCHMARK_SYMBOL], errors="ignore")
 
-    if prices.shape[1] < min_required_assets:
-        raise RuntimeError(f"Only {prices.shape[1]} instrument(s) remained after price-data cleaning. {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering and data cleaning.'}")
+    if prices.shape[1] < 3:
+        raise RuntimeError("Not enough assets available after cleaning")
 
     mu, cov_matrix, weights, perf, frontier = optimize_with_strategy(
         prices=prices,
@@ -763,10 +555,7 @@ def build_portfolio_context(payload):
         group_targets=group_targets_input,
         min_weight=min_weight,
         max_weight=max_weight,
-        group_map=group_map,
-        group_bounds=group_bounds_input,
-        group_views=group_views_input,
-        view_confidences=view_confidences_input
+        group_map=group_map
     )
 
     returns = prices.pct_change().dropna()
@@ -845,10 +634,6 @@ def build_portfolio_context(payload):
         "group_map": group_map,
         "group_weights_prior": group_weight_breakdown(prior_weight_series, group_map),
         "group_weights_optimized": group_weight_breakdown(weight_series, group_map),
-        "group_targets_used": group_targets_input,
-        "group_bounds_used": group_bounds_input,
-        "group_views_used": group_views_input,
-        "view_confidences_used": view_confidences_input,
         "cov_returns": cov_returns,
 
         "metrics": {
@@ -1257,134 +1042,6 @@ def api_technical(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-
-def _download_close_matrix(symbols, period="5y", interval="1d"):
-    if not symbols:
-        raise RuntimeError("No symbols supplied")
-    frames = {}
-    for sym in symbols:
-        try:
-            s = _download_close(sym, period=period, interval=interval)
-            frames[sym] = s.rename(sym)
-        except Exception:
-            continue
-    if not frames:
-        raise RuntimeError("No price histories could be downloaded for the selected symbols")
-    df = pd.concat(frames.values(), axis=1).sort_index().ffill().dropna(how="all")
-    return df
-
-
-def _series_records(s: pd.Series):
-    return [{"date": pd.to_datetime(i).strftime("%Y-%m-%d"), "value": float(v)} for i, v in s.dropna().items()]
-
-
-def _compare_symbol_block(symbol: str, period: str = "5y"):
-    close = _download_close(symbol, period=period, interval="1d")
-    returns = close.pct_change().dropna()
-    metrics = _quant_metrics(returns)
-    dd = compute_drawdown(returns)[1]
-    rv = returns.rolling(63).std() * np.sqrt(TRADING_DAYS)
-    return {
-        "symbol": symbol,
-        "latest_price": float(close.iloc[-1]),
-        "metrics": metrics,
-        "price": _series_records(close),
-        "cumulative": _series_records((1 + returns).cumprod()),
-        "drawdown": _series_records(dd),
-        "rolling_vol": _series_records(rv)
-    }
-
-
-def build_msci_em_turkey_analysis(period: str = "5y"):
-    universe = load_universe()
-    items = flatten_universe(universe)
-    universe_symbols = {x["symbol"] for x in items}
-
-    em_core = [s for s in EM_BENCHMARK_SYMBOLS if s in universe_symbols]
-    turkey_equity = [s for s in TURKEY_EQUITY_SYMBOLS if s in universe_symbols]
-    turkey_bond = [s for s in TURKEY_BOND_PROXY_SYMBOLS if s in universe_symbols]
-
-    em_country_symbols = [x["symbol"] for x in items if x["group"].startswith("Country ETF - EM") or x["group"].startswith("Country ETF - Turkey")]
-
-    focus = []
-    for s in em_core + turkey_equity + turkey_bond + em_country_symbols:
-        if s not in focus:
-            focus.append(s)
-
-    price_df = _download_close_matrix(focus, period=period, interval="1d")
-    ret_df = price_df.pct_change().dropna(how="all")
-
-    metrics_rows = []
-    labels = label_map()
-    groups = symbol_group_map()
-    for sym in ret_df.columns:
-        r = ret_df[sym].dropna()
-        if len(r) < 40:
-            continue
-        m = _quant_metrics(r)
-        metrics_rows.append({
-            "symbol": sym,
-            "label": labels.get(sym, sym),
-            "group": groups.get(sym, "Unknown"),
-            **m
-        })
-
-    metrics_rows = sorted(metrics_rows, key=lambda x: (x.get("sharpe") if x.get("sharpe") is not None else -999), reverse=True)
-
-    cum_df = (1 + ret_df).cumprod()
-    rolling_vol_df = ret_df.rolling(63).std() * np.sqrt(TRADING_DAYS)
-
-    def chart_records(symbols):
-        out = {}
-        for sym in symbols:
-            if sym in cum_df.columns:
-                out[sym] = {
-                    "label": labels.get(sym, sym),
-                    "group": groups.get(sym, "Unknown"),
-                    "cumulative": _series_records(cum_df[sym]),
-                    "rolling_vol": _series_records(rolling_vol_df[sym]),
-                }
-        return out
-
-    turkey_equity_blocks = []
-    for sym in turkey_equity:
-        if sym in price_df.columns:
-            turkey_equity_blocks.append(_compare_symbol_block(sym, period=period))
-
-    turkey_bond_blocks = []
-    for sym in turkey_bond:
-        if sym in price_df.columns:
-            turkey_bond_blocks.append(_compare_symbol_block(sym, period=period))
-
-    return {
-        "period": period,
-        "em_core_symbols": em_core,
-        "turkey_equity_symbols": turkey_equity,
-        "turkey_bond_proxy_symbols": [b["symbol"] for b in turkey_bond_blocks],
-        "metrics_table": metrics_rows,
-        "em_core_charts": chart_records(em_core),
-        "country_em_charts": chart_records(em_country_symbols),
-        "turkey_equity": turkey_equity_blocks,
-        "turkey_bond_proxies": turkey_bond_blocks,
-        "notes": [
-            "Turkey equity sleeve uses TUR when available.",
-            "Turkey fixed-income sleeve is modeled with emerging-markets bond proxies because a dedicated U.S.-listed single-country Turkey sovereign bond ETF is not generally available in this universe."
-        ]
-    }
-
-
-@app.post("/api/msci-em-analysis")
-def api_msci_em_analysis(payload: dict = Body(...)):
-    try:
-        period = payload.get("period", "5y")
-        if period not in {"1y", "2y", "5y", "10y", "max"}:
-            period = "5y"
-        result = build_msci_em_turkey_analysis(period=period)
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/")
 def root():
     return FileResponse(INDEX_FILE)
@@ -1422,15 +1079,6 @@ def api_snapshot(force: bool = False):
             stale["stale"] = True
             stale["error"] = str(e)
             return JSONResponse(content=stale)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-@app.get("/api/major-world-indices")
-def api_major_world_indices():
-    try:
-        return JSONResponse(content=build_market_snapshot(MAJOR_WORLD_INDICES, period="2y"))
-    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1495,7 +1143,6 @@ def api_analytics(payload: dict = Body(...)):
         result = {
             "strategy": ctx["strategy"],
             "benchmark_symbol": BENCHMARK_SYMBOL,
-            "benchmark_summary": ctx["metrics"],
             "rolling_sharpe": series_to_records(rolling_sharpe),
             "cumulative": series_to_records(cumulative),
             "drawdown": series_to_records(drawdown),
@@ -1574,3 +1221,66 @@ def api_lstm_forecast(payload: dict = Body(...)):
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def _build_watchlist_snapshot(items, period="1y", interval="1d"):
+    if not items:
+        return {"generated_at": pd.Timestamp.utcnow().isoformat(), "count": 0, "rows": []}
+    symbols = [x["symbol"] for x in items]
+    raw = yf.download(
+        tickers=symbols,
+        period=period,
+        interval=interval,
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+        group_by="ticker"
+    )
+    if raw.empty:
+        raise RuntimeError("Yahoo Finance returned empty dataset for the selected watchlist")
+    rows = []
+    total_symbols = len(symbols)
+    for item in items:
+        symbol = item["symbol"]
+        try:
+            sdf = extract_symbol_frame(raw, symbol, total_symbols).copy().dropna(how="all")
+            if sdf.empty or "Close" not in sdf.columns:
+                continue
+            close = sdf["Close"].dropna()
+            volume = sdf["Volume"].dropna() if "Volume" in sdf.columns else pd.Series(dtype=float)
+            if len(close) < 2:
+                continue
+            last = float(close.iloc[-1])
+            prev = float(close.iloc[-2])
+            rows.append({
+                "symbol": symbol,
+                "label": item.get("label", symbol),
+                "group": item.get("bucket") or item.get("region") or item.get("group") or "Watchlist",
+                "price": last,
+                "ret_1d_pct": ((last / prev) - 1.0) * 100.0 if prev else None,
+                "ret_1w_pct": safe_pct_return(close, 5),
+                "ret_1m_pct": safe_pct_return(close, 21),
+                "ret_3m_pct": safe_pct_return(close, 63),
+                "ret_6m_pct": safe_pct_return(close, 126),
+                "ret_1y_pct": safe_pct_return(close, 252),
+                "ytd_pct": ytd_return(close),
+                "vol_30d_pct": annualized_volatility(close, 30),
+                "avg_volume_20d": avg_volume(volume, 20),
+                "sparkline": close.tail(30).round(6).tolist()
+            })
+        except Exception:
+            continue
+    return {"generated_at": pd.Timestamp.utcnow().isoformat(), "count": len(rows), "rows": rows}
+
+
+@app.get("/api/major-world-indices")
+def api_major_world_indices():
+    universe = load_universe()
+    items = universe.get("major_world_indices", [])
+    return JSONResponse(content=_build_watchlist_snapshot(items, period="1y"))
+
+
+@app.get("/api/futures-dashboard")
+def api_futures_dashboard():
+    universe = load_universe()
+    items = universe.get("futures_watchlist", [])
+    return JSONResponse(content=_build_watchlist_snapshot(items, period="1y"))
