@@ -771,8 +771,7 @@ def build_portfolio_context(payload):
         tmp.index = [group_map.get(s, "Unknown") for s in tmp.index]
         group_targets_input = tmp.groupby(tmp.index).sum().to_dict()
 
-    if len(symbols) < 3:
-        min_required_assets = 1 if strategy == "prior_only" else 2
+    min_required_assets = 1 if strategy == "prior_only" else 2
     if len(symbols) < min_required_assets:
         raise RuntimeError(f"The selected asset-class universe contains only {len(symbols)} instrument(s). {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering.'}")
 
