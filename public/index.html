@@ -388,6 +388,7 @@
       <button class="tab-btn" data-tab="analytics-pane">Analytics</button>
       <button class="tab-btn" data-tab="risk-pane">Risk Dashboard</button>
       <button class="tab-btn" data-tab="forecast-pane">Forecast</button>
+      <button class="tab-btn" data-tab="msci-em-pane">MSCI EM & Turkey</button>
     </div>
 
     <div class="content-area">
@@ -803,6 +804,101 @@
         </div>
 
         <div id="risk-status" class="status-line"></div>
+      </div>
+
+
+
+      <div id="msci-em-pane" class="tab-pane">
+        <div class="section-block">
+          <div class="section-title">MSCI Emerging Markets & Turkey Deep-Dive</div>
+          <div class="small-note">
+            Core EM benchmark ETF’leri, ülke ETF’leri ve Türkiye’nin hisse / tahvil vekil performansını ayrı ayrı analiz eder.
+          </div>
+
+          <div class="toolbar" style="margin-top:12px;">
+            <label for="em-period">Period</label>
+            <select id="em-period">
+              <option value="1y">1Y</option>
+              <option value="2y">2Y</option>
+              <option value="5y" selected>5Y</option>
+              <option value="10y">10Y</option>
+              <option value="max">MAX</option>
+            </select>
+            <button id="run-em-analysis-btn">Run EM / Turkey Analysis</button>
+          </div>
+
+          <div class="small-note" id="em-analysis-status">Hazır.</div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-box"><div class="kpi-label">EM Core ETFs</div><div class="kpi-value" id="em-core-count">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Turkey Equity Sleeve</div><div class="kpi-value" id="turkey-equity-count">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Turkey Bond Proxies</div><div class="kpi-value" id="turkey-bond-count">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Metrics Rows</div><div class="kpi-value" id="em-metrics-count">—</div></div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel-box">
+            <div class="section-title">EM Core Cumulative Performance</div>
+            <div id="em-core-cumulative-chart" class="medium-plot"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">EM Core Rolling Volatility</div>
+            <div id="em-core-vol-chart" class="medium-plot"></div>
+          </div>
+        </div>
+
+        <div class="two-col" style="margin-top:16px;">
+          <div class="panel-box">
+            <div class="section-title">Turkey Equity vs Bond Proxy · Cumulative</div>
+            <div id="turkey-cumulative-chart" class="medium-plot"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">Turkey Equity vs Bond Proxy · Rolling Volatility</div>
+            <div id="turkey-vol-chart" class="medium-plot"></div>
+          </div>
+        </div>
+
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">MSCI Emerging Markets / Country ETF Metrics</div>
+          <div class="table-shell" style="max-height:420px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset Class</th>
+                  <th>Symbol</th>
+                  <th>Instrument</th>
+                  <th class="right-text">CAGR</th>
+                  <th class="right-text">Vol</th>
+                  <th class="right-text">Sharpe</th>
+                  <th class="right-text">Sortino</th>
+                  <th class="right-text">Max DD</th>
+                </tr>
+              </thead>
+              <tbody id="em-metrics-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Turkey Equity vs Fixed Income Separation</div>
+          <div class="table-shell" style="max-height:320px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Sleeve</th>
+                  <th>Symbol</th>
+                  <th class="right-text">CAGR</th>
+                  <th class="right-text">Vol</th>
+                  <th class="right-text">Sharpe</th>
+                  <th class="right-text">Max DD</th>
+                </tr>
+              </thead>
+              <tbody id="turkey-split-table-body"></tbody>
+            </table>
+          </div>
+          <div class="small-note" id="turkey-split-note" style="margin-top:10px;"></div>
+        </div>
       </div>
 
       <div id="forecast-pane" class="tab-pane">
@@ -2369,6 +2465,60 @@ function computeFeasibility() {
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("checkFeasibility");
   if (btn) btn.addEventListener("click", (e)=>{ e.preventDefault(); computeFeasibility(); });
+});
+</script>
+
+
+<script>
+function plotMultiSeries(containerId, seriesMap, field, titleY) {
+  const traces = Object.keys(seriesMap || {}).map(sym => ({
+    x: (seriesMap[sym][field] || []).map(r => r.date),
+    y: (seriesMap[sym][field] || []).map(r => r.value),
+    type: "scatter", mode: "lines", name: `${sym} — ${seriesMap[sym].label || sym}`
+  }));
+  Plotly.newPlot(containerId, traces, {margin:{l:60,r:25,t:20,b:50}, xaxis:{title:"Date",gridcolor:"#d8d8d8"}, yaxis:{title:titleY,gridcolor:"#d8d8d8"}, paper_bgcolor:"#f8f8f8", plot_bgcolor:"#f8f8f8", legend:{orientation:"h"}}, {responsive:true, displayModeBar:true});
+}
+function renderEmMetricsTable(rows) {
+  const tbody = document.getElementById("em-metrics-table-body"); if (!tbody) return; tbody.innerHTML = "";
+  (rows || []).forEach(row => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${row.group || "Unknown"}</td><td>${row.symbol}</td><td class="left-text">${row.label || row.symbol}</td><td class="right-text">${fmtPctDecimal(row.cagr || 0)}</td><td class="right-text">${fmtPctDecimal(row.volatility || 0)}</td><td class="right-text">${fmtNumber(row.sharpe)}</td><td class="right-text">${fmtNumber(row.sortino)}</td><td class="right-text">${fmtPctDecimal(row.max_drawdown || 0)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+function renderTurkeySplitTable(equityRows, bondRows, notes) {
+  const tbody = document.getElementById("turkey-split-table-body"); if (!tbody) return; tbody.innerHTML = "";
+  const appendRows = (rows, sleeve) => { (rows || []).forEach(row => { const m = row.metrics || {}; const tr = document.createElement("tr"); tr.innerHTML = `<td>${sleeve}</td><td>${row.symbol}</td><td class="right-text">${fmtPctDecimal(m.cagr || 0)}</td><td class="right-text">${fmtPctDecimal(m.volatility || 0)}</td><td class="right-text">${fmtNumber(m.sharpe)}</td><td class="right-text">${fmtPctDecimal(m.max_drawdown || 0)}</td>`; tbody.appendChild(tr); }); };
+  appendRows(equityRows, "Turkey Equity"); appendRows(bondRows, "Turkey Bond Proxy");
+  const note = document.getElementById("turkey-split-note"); if (note) note.textContent = (notes || []).join(" ");
+}
+async function runMsciEmAnalysis() {
+  const status = document.getElementById("em-analysis-status"); const btn = document.getElementById("run-em-analysis-btn");
+  if (!status || !btn) return;
+  btn.disabled = true; btn.textContent = "Running..."; status.textContent = "MSCI EM / Turkey analysis is running...";
+  try {
+    const payload = { period: document.getElementById("em-period")?.value || "5y" };
+    const res = await fetch("/api/msci-em-analysis", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+    const data = await res.json(); if (!res.ok) throw new Error(data.detail || "MSCI EM analysis failed");
+    document.getElementById("em-core-count").textContent = String((data.em_core_symbols || []).length);
+    document.getElementById("turkey-equity-count").textContent = String((data.turkey_equity_symbols || []).length);
+    document.getElementById("turkey-bond-count").textContent = String((data.turkey_bond_proxy_symbols || []).length);
+    document.getElementById("em-metrics-count").textContent = String((data.metrics_table || []).length);
+    plotMultiSeries("em-core-cumulative-chart", data.em_core_charts || {}, "cumulative", "Cumulative Growth");
+    plotMultiSeries("em-core-vol-chart", data.em_core_charts || {}, "rolling_vol", "Rolling Volatility");
+    const turkeyMap = {};
+    (data.turkey_equity || []).forEach(row => { turkeyMap[row.symbol] = { label: row.symbol, cumulative: row.cumulative || [], rolling_vol: row.rolling_vol || [] }; });
+    (data.turkey_bond_proxies || []).forEach(row => { turkeyMap[row.symbol] = { label: row.symbol, cumulative: row.cumulative || [], rolling_vol: row.rolling_vol || [] }; });
+    plotMultiSeries("turkey-cumulative-chart", turkeyMap, "cumulative", "Cumulative Growth");
+    plotMultiSeries("turkey-vol-chart", turkeyMap, "rolling_vol", "Rolling Volatility");
+    renderEmMetricsTable(data.metrics_table || []);
+    renderTurkeySplitTable(data.turkey_equity || [], data.turkey_bond_proxies || [], data.notes || []);
+    status.textContent = `MSCI EM / Turkey analysis complete · Period: ${data.period}`;
+  } catch (err) { status.textContent = `MSCI EM / Turkey analysis error: ${err.message}`; }
+  finally { btn.disabled = false; btn.textContent = "Run EM / Turkey Analysis"; }
+}
+document.addEventListener("DOMContentLoaded", () => {
+  const emBtn = document.getElementById("run-em-analysis-btn"); if (emBtn) emBtn.addEventListener("click", runMsciEmAnalysis);
 });
 </script>
 
