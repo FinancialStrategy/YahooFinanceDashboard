@@ -1,569 +1,691 @@
 {
+  "schema_version": "3.0",
+  "base_currency": "USD",
+  "target_sum_expected": 1.0,
+  "notes": "Expanded institutional multi-asset universe with broad ETF coverage, country ETFs, major crypto, and a consolidated Yahoo Finance Futures asset class.",
   "groups": [
     {
-      "family": "ETF",
-      "name": "US Equity ETF - Large Cap Blend",
+      "name": "Equity ETF - US Large Cap Blend",
       "color": "#2563eb",
       "items": [
         {
           "symbol": "SPY",
           "label": "SPDR S&P 500 ETF Trust",
-          "target": 0.04329
+          "target": 0.009091
         },
         {
           "symbol": "IVV",
           "label": "iShares Core S&P 500 ETF",
-          "target": 0.04329
+          "target": 0.009091
         },
         {
           "symbol": "VOO",
           "label": "Vanguard S&P 500 ETF",
-          "target": 0.04329
+          "target": 0.009091
+        },
+        {
+          "symbol": "SPLG",
+          "label": "SPDR Portfolio S&P 500 ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "RSP",
+          "label": "Invesco S&P 500 Equal Weight ETF",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
-      "name": "US Equity ETF - Growth",
+      "name": "Equity ETF - US Large Cap Growth",
       "color": "#1d4ed8",
       "items": [
         {
           "symbol": "QQQ",
           "label": "Invesco QQQ Trust",
-          "target": 0.032468
+          "target": 0.009091
         },
         {
           "symbol": "VUG",
           "label": "Vanguard Growth ETF",
-          "target": 0.027056
+          "target": 0.009091
+        },
+        {
+          "symbol": "SCHG",
+          "label": "Schwab U.S. Large-Cap Growth ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "MGK",
+          "label": "Vanguard Mega Cap Growth ETF",
+          "target": 0.009091
         },
         {
           "symbol": "IWF",
           "label": "iShares Russell 1000 Growth ETF",
-          "target": 0.027056
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
-      "name": "US Equity ETF - Value",
-      "color": "#1e40af",
+      "name": "Equity ETF - US Large Cap Value & Dividend",
+      "color": "#0ea5e9",
       "items": [
         {
           "symbol": "VTV",
           "label": "Vanguard Value ETF",
-          "target": 0.021645
+          "target": 0.009091
         },
         {
-          "symbol": "IVE",
-          "label": "iShares S&P 500 Value ETF",
-          "target": 0.021645
+          "symbol": "IWD",
+          "label": "iShares Russell 1000 Value ETF",
+          "target": 0.009091
         },
         {
-          "symbol": "SCHV",
-          "label": "Schwab US Large-Cap Value ETF",
-          "target": 0.021645
+          "symbol": "SCHD",
+          "label": "Schwab U.S. Dividend Equity ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "VYM",
+          "label": "Vanguard High Dividend Yield ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "DGRO",
+          "label": "iShares Core Dividend Growth ETF",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
-      "name": "US Small & Mid Cap ETF",
+      "name": "Equity ETF - US Mid / Small Cap",
       "color": "#3b82f6",
       "items": [
         {
           "symbol": "IWM",
           "label": "iShares Russell 2000 ETF",
-          "target": 0.021645
+          "target": 0.009091
         },
         {
           "symbol": "IJH",
           "label": "iShares Core S&P Mid-Cap ETF",
-          "target": 0.021645
+          "target": 0.009091
         },
         {
           "symbol": "VB",
           "label": "Vanguard Small-Cap ETF",
-          "target": 0.021645
-        }
-      ]
-    },
-    {
-      "family": "ETF",
-      "name": "Developed Markets ETF",
-      "color": "#0f766e",
-      "items": [
-        {
-          "symbol": "VEA",
-          "label": "Vanguard FTSE Developed Markets ETF",
-          "target": 0.027056
+          "target": 0.009091
         },
         {
-          "symbol": "IEFA",
-          "label": "iShares Core MSCI EAFE ETF",
-          "target": 0.027056
+          "symbol": "VBR",
+          "label": "Vanguard Small-Cap Value ETF",
+          "target": 0.009091
         },
         {
-          "symbol": "EFA",
-          "label": "iShares MSCI EAFE ETF",
-          "target": 0.021645
+          "symbol": "IJR",
+          "label": "iShares Core S&P Small-Cap ETF",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
       "name": "MSCI Emerging Markets - Core",
-      "color": "#059669",
+      "color": "#06b6d4",
       "items": [
-        {
-          "symbol": "IEMG",
-          "label": "iShares Core MSCI Emerging Markets ETF",
-          "target": 0.027056
-        },
         {
           "symbol": "VWO",
           "label": "Vanguard FTSE Emerging Markets ETF",
-          "target": 0.027056
+          "target": 0.009091
+        },
+        {
+          "symbol": "IEMG",
+          "label": "iShares Core MSCI Emerging Markets ETF",
+          "target": 0.009091
         },
         {
           "symbol": "EEM",
           "label": "iShares MSCI Emerging Markets ETF",
-          "target": 0.021645
+          "target": 0.009091
+        },
+        {
+          "symbol": "SPEM",
+          "label": "SPDR Portfolio Emerging Markets ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "SCHE",
+          "label": "Schwab Emerging Markets Equity ETF",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
-      "name": "Country ETF - Turkey Equity",
-      "color": "#16a34a",
+      "name": "Equity ETF - Emerging Markets Country",
+      "color": "#0891b2",
       "items": [
         {
           "symbol": "TUR",
           "label": "iShares MSCI Turkey ETF",
-          "target": 0.016234
-        }
-      ]
-    },
-    {
-      "family": "ETF",
-      "name": "Country ETF - Asia",
-      "color": "#15803d",
-      "items": [
-        {
-          "symbol": "EWJ",
-          "label": "iShares MSCI Japan ETF",
-          "target": 0.010823
-        },
-        {
-          "symbol": "EWY",
-          "label": "iShares MSCI South Korea ETF",
-          "target": 0.010823
-        },
-        {
-          "symbol": "MCHI",
-          "label": "iShares MSCI China ETF",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "INDA",
           "label": "iShares MSCI India ETF",
-          "target": 0.010823
-        }
-      ]
-    },
-    {
-      "family": "ETF",
-      "name": "Country ETF - Europe & LatAm",
-      "color": "#65a30d",
-      "items": [
-        {
-          "symbol": "EWG",
-          "label": "iShares MSCI Germany ETF",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
-          "symbol": "EWU",
-          "label": "iShares MSCI United Kingdom ETF",
-          "target": 0.010823
+          "symbol": "MCHI",
+          "label": "iShares MSCI China ETF",
+          "target": 0.009091
         },
         {
           "symbol": "EWZ",
           "label": "iShares MSCI Brazil ETF",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "EWW",
           "label": "iShares MSCI Mexico ETF",
-          "target": 0.010823
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
-      "name": "Treasury & Bond ETF",
+      "name": "Equity ETF - International Developed",
+      "color": "#8b5cf6",
+      "items": [
+        {
+          "symbol": "VEA",
+          "label": "Vanguard FTSE Developed Markets ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "IEFA",
+          "label": "iShares Core MSCI EAFE ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EFA",
+          "label": "iShares MSCI EAFE ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "SPDW",
+          "label": "SPDR Portfolio Developed World ex-US ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWJ",
+          "label": "iShares MSCI Japan ETF",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
+      "name": "Country ETF - Developed Markets",
       "color": "#7c3aed",
       "items": [
         {
-          "symbol": "TLT",
-          "label": "iShares 20+ Year Treasury Bond ETF",
-          "target": 0.027056
+          "symbol": "EWU",
+          "label": "iShares MSCI United Kingdom ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWG",
+          "label": "iShares MSCI Germany ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWQ",
+          "label": "iShares MSCI France ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWI",
+          "label": "iShares MSCI Italy ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWA",
+          "label": "iShares MSCI Australia ETF",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
+      "name": "Country ETF - Asia & Frontier",
+      "color": "#a855f7",
+      "items": [
+        {
+          "symbol": "EWT",
+          "label": "iShares MSCI Taiwan ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWY",
+          "label": "iShares MSCI South Korea ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWH",
+          "label": "iShares MSCI Hong Kong ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EWS",
+          "label": "iShares MSCI Singapore ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "FM",
+          "label": "iShares Frontier and Select EM ETF",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
+      "name": "Fixed Income ETF - US Treasury",
+      "color": "#10b981",
+      "items": [
+        {
+          "symbol": "SHY",
+          "label": "iShares 1-3 Year Treasury Bond ETF",
+          "target": 0.009091
         },
         {
           "symbol": "IEF",
           "label": "iShares 7-10 Year Treasury Bond ETF",
-          "target": 0.021645
+          "target": 0.009091
         },
         {
-          "symbol": "SHY",
-          "label": "iShares 1-3 Year Treasury Bond ETF",
-          "target": 0.016234
+          "symbol": "TLT",
+          "label": "iShares 20+ Year Treasury Bond ETF",
+          "target": 0.009091
         },
         {
-          "symbol": "TIP",
-          "label": "iShares TIPS Bond ETF",
-          "target": 0.016234
+          "symbol": "VGSH",
+          "label": "Vanguard Short-Term Treasury ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "VGIT",
+          "label": "Vanguard Intermediate-Term Treasury ETF",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
-      "name": "Credit & EM Bond ETF",
-      "color": "#8b5cf6",
+      "name": "Fixed Income ETF - IG & HY Credit",
+      "color": "#22c55e",
       "items": [
         {
           "symbol": "LQD",
           "label": "iShares iBoxx $ Investment Grade Corporate Bond ETF",
-          "target": 0.016234
+          "target": 0.009091
         },
         {
           "symbol": "HYG",
           "label": "iShares iBoxx $ High Yield Corporate Bond ETF",
-          "target": 0.016234
+          "target": 0.009091
         },
+        {
+          "symbol": "VCIT",
+          "label": "Vanguard Intermediate-Term Corporate Bond ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "USHY",
+          "label": "iShares Broad USD High Yield Corporate Bond ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "IGIB",
+          "label": "iShares 5-10 Year Investment Grade Corporate Bond ETF",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
+      "name": "Emerging Market Bond ETF",
+      "color": "#14b8a6",
+      "items": [
         {
           "symbol": "EMB",
           "label": "iShares J.P. Morgan USD Emerging Markets Bond ETF",
-          "target": 0.016234
+          "target": 0.009091
         },
         {
           "symbol": "EMLC",
           "label": "VanEck J.P. Morgan EM Local Currency Bond ETF",
-          "target": 0.010823
+          "target": 0.009091
+        },
+        {
+          "symbol": "LEMB",
+          "label": "iShares Emerging Markets Local Currency Bond ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "EMHY",
+          "label": "iShares Emerging Markets High Yield Bond ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "VWOB",
+          "label": "Vanguard Emerging Markets Government Bond ETF",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "ETF",
-      "name": "Real Assets & Commodity ETF",
-      "color": "#a16207",
+      "name": "Inflation / Floating / Cash ETF",
+      "color": "#84cc16",
+      "items": [
+        {
+          "symbol": "TIP",
+          "label": "iShares TIPS Bond ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "SCHP",
+          "label": "Schwab U.S. TIPS ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "USFR",
+          "label": "WisdomTree Floating Rate Treasury Fund",
+          "target": 0.009091
+        },
+        {
+          "symbol": "BIL",
+          "label": "SPDR Bloomberg 1-3 Month T-Bill ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "SGOV",
+          "label": "iShares 0-3 Month Treasury Bond ETF",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
+      "name": "Real Assets ETF - REITs & Infrastructure",
+      "color": "#f59e0b",
       "items": [
         {
           "symbol": "VNQ",
           "label": "Vanguard Real Estate ETF",
-          "target": 0.016234
+          "target": 0.009091
         },
+        {
+          "symbol": "REET",
+          "label": "iShares Global REIT ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "IGF",
+          "label": "iShares Global Infrastructure ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "REM",
+          "label": "iShares Mortgage Real Estate ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "PAVE",
+          "label": "Global X U.S. Infrastructure Development ETF",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
+      "name": "Commodity ETF - Broad / Energy / Agriculture",
+      "color": "#f97316",
+      "items": [
+        {
+          "symbol": "DBC",
+          "label": "Invesco DB Commodity Index Tracking Fund",
+          "target": 0.009091
+        },
+        {
+          "symbol": "USO",
+          "label": "United States Oil Fund",
+          "target": 0.009091
+        },
+        {
+          "symbol": "DBA",
+          "label": "Invesco DB Agriculture Fund",
+          "target": 0.009091
+        },
+        {
+          "symbol": "UNG",
+          "label": "United States Natural Gas Fund",
+          "target": 0.009091
+        },
+        {
+          "symbol": "CORN",
+          "label": "Teucrium Corn Fund",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
+      "name": "Precious Metals ETF",
+      "color": "#ef4444",
+      "items": [
         {
           "symbol": "GLD",
           "label": "SPDR Gold Shares",
-          "target": 0.016234
+          "target": 0.009091
+        },
+        {
+          "symbol": "IAU",
+          "label": "iShares Gold Trust",
+          "target": 0.009091
         },
         {
           "symbol": "SLV",
           "label": "iShares Silver Trust",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
-          "symbol": "DBC",
-          "label": "Invesco DB Commodity Index Tracking Fund",
-          "target": 0.016234
+          "symbol": "PPLT",
+          "label": "abrdn Physical Platinum Shares ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "SGOL",
+          "label": "abrdn Physical Gold Shares ETF",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "Crypto",
+      "name": "Alternative Strategy ETF",
+      "color": "#dc2626",
+      "items": [
+        {
+          "symbol": "CTA",
+          "label": "Simplify Managed Futures Strategy ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "DBMF",
+          "label": "iMGP DBi Managed Futures Strategy ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "BTAL",
+          "label": "AGF U.S. Market Neutral Anti-Beta Fund",
+          "target": 0.009091
+        },
+        {
+          "symbol": "KMLM",
+          "label": "KFA Mount Lucas Managed Futures Index Strategy ETF",
+          "target": 0.009091
+        },
+        {
+          "symbol": "PFIX",
+          "label": "Simplify Interest Rate Hedge ETF",
+          "target": 0.009091
+        }
+      ],
+      "family": "Other"
+    },
+    {
       "name": "Major Crypto",
       "color": "#f59e0b",
       "items": [
         {
           "symbol": "BTC-USD",
           "label": "Bitcoin USD",
-          "target": 0.021645
+          "target": 0.009091
         },
         {
           "symbol": "ETH-USD",
           "label": "Ethereum USD",
-          "target": 0.016234
-        },
-        {
-          "symbol": "BNB-USD",
-          "label": "BNB USD",
-          "target": 0.005411
+          "target": 0.009091
         },
         {
           "symbol": "XRP-USD",
           "label": "XRP USD",
-          "target": 0.005411
+          "target": 0.009091
         },
         {
           "symbol": "SOL-USD",
           "label": "Solana USD",
-          "target": 0.005411
+          "target": 0.009091
+        },
+        {
+          "symbol": "BNB-USD",
+          "label": "BNB USD",
+          "target": 0.009091
         }
-      ]
+      ],
+      "family": "Other"
     },
     {
-      "family": "Futures",
-      "name": "Futures - Metals",
-      "color": "#f97316",
+      "name": "Futures",
+      "color": "#2563eb",
       "items": [
         {
           "symbol": "GC=F",
           "label": "Gold Futures",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "SI=F",
           "label": "Silver Futures",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "HG=F",
           "label": "Copper Futures",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "PL=F",
           "label": "Platinum Futures",
-          "target": 0.005411
+          "target": 0.009091
         },
         {
           "symbol": "PA=F",
           "label": "Palladium Futures",
-          "target": 0.005411
-        }
-      ]
-    },
-    {
-      "family": "Futures",
-      "name": "Futures - Energy",
-      "color": "#ea580c",
-      "items": [
+          "target": 0.009091
+        },
         {
           "symbol": "CL=F",
           "label": "Crude Oil WTI Futures",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "BZ=F",
           "label": "Brent Crude Futures",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "NG=F",
           "label": "Natural Gas Futures",
-          "target": 0.010823
+          "target": 0.009091
         },
         {
           "symbol": "RB=F",
           "label": "RBOB Gasoline Futures",
-          "target": 0.005411
+          "target": 0.009091
         },
         {
           "symbol": "HO=F",
           "label": "Heating Oil Futures",
-          "target": 0.005411
-        }
-      ]
-    },
-    {
-      "family": "Futures",
-      "name": "Futures - Grains",
-      "color": "#c2410c",
-      "items": [
+          "target": 0.009091
+        },
         {
           "symbol": "ZC=F",
           "label": "Corn Futures",
-          "target": 0.005411
+          "target": 0.009091
+        },
+        {
+          "symbol": "ZS=F",
+          "label": "Soybean Futures",
+          "target": 0.009091
         },
         {
           "symbol": "ZW=F",
           "label": "Wheat Futures",
-          "target": 0.005411
+          "target": 0.009091
         },
-        {
-          "symbol": "KE=F",
-          "label": "KC Wheat Futures",
-          "target": 0.005411
-        },
-        {
-          "symbol": "ZO=F",
-          "label": "Oats Futures",
-          "target": 0.003247
-        },
-        {
-          "symbol": "ZR=F",
-          "label": "Rough Rice Futures",
-          "target": 0.002165
-        }
-      ]
-    },
-    {
-      "family": "Futures",
-      "name": "Futures - Oilseeds",
-      "color": "#9a3412",
-      "items": [
-        {
-          "symbol": "ZS=F",
-          "label": "Soybean Futures",
-          "target": 0.005411
-        },
-        {
-          "symbol": "ZM=F",
-          "label": "Soybean Meal Futures",
-          "target": 0.003247
-        },
-        {
-          "symbol": "ZL=F",
-          "label": "Soybean Oil Futures",
-          "target": 0.003247
-        }
-      ]
-    },
-    {
-      "family": "Futures",
-      "name": "Futures - Softs",
-      "color": "#7c2d12",
-      "items": [
         {
           "symbol": "KC=F",
           "label": "Coffee Futures",
-          "target": 0.004329
+          "target": 0.009091
         },
         {
           "symbol": "CT=F",
           "label": "Cotton Futures",
-          "target": 0.003247
+          "target": 0.009091
         },
         {
           "symbol": "SB=F",
           "label": "Sugar Futures",
-          "target": 0.003247
+          "target": 0.009091
         },
         {
           "symbol": "CC=F",
           "label": "Cocoa Futures",
-          "target": 0.003247
+          "target": 0.009091
         },
-        {
-          "symbol": "OJ=F",
-          "label": "Orange Juice Futures",
-          "target": 0.002165
-        }
-      ]
-    },
-    {
-      "family": "Futures",
-      "name": "Futures - Livestock",
-      "color": "#b45309",
-      "items": [
         {
           "symbol": "LE=F",
           "label": "Live Cattle Futures",
-          "target": 0.003247
+          "target": 0.009091
         },
         {
           "symbol": "HE=F",
           "label": "Lean Hogs Futures",
-          "target": 0.003247
+          "target": 0.009091
         },
         {
-          "symbol": "GF=F",
-          "label": "Feeder Cattle Futures",
-          "target": 0.002165
+          "symbol": "LBS=F",
+          "label": "Lumber Futures",
+          "target": 0.009091
         }
-      ]
-    },
-    {
-      "family": "World Indices",
-      "name": "Major World Indices",
-      "color": "#dc2626",
-      "items": [
-        {
-          "symbol": "^GSPC",
-          "label": "S&P 500",
-          "target": 0.0
-        },
-        {
-          "symbol": "^DJI",
-          "label": "Dow Jones Industrial Average",
-          "target": 0.0
-        },
-        {
-          "symbol": "^IXIC",
-          "label": "NASDAQ Composite",
-          "target": 0.0
-        },
-        {
-          "symbol": "^RUT",
-          "label": "Russell 2000",
-          "target": 0.0
-        },
-        {
-          "symbol": "^FTSE",
-          "label": "FTSE 100",
-          "target": 0.0
-        },
-        {
-          "symbol": "^GDAXI",
-          "label": "DAX",
-          "target": 0.0
-        },
-        {
-          "symbol": "^FCHI",
-          "label": "CAC 40",
-          "target": 0.0
-        },
-        {
-          "symbol": "^STOXX50E",
-          "label": "EURO STOXX 50",
-          "target": 0.0
-        },
-        {
-          "symbol": "^N225",
-          "label": "Nikkei 225",
-          "target": 0.0
-        },
-        {
-          "symbol": "^HSI",
-          "label": "Hang Seng",
-          "target": 0.0
-        },
-        {
-          "symbol": "000001.SS",
-          "label": "Shanghai Composite",
-          "target": 0.0
-        },
-        {
-          "symbol": "^AXJO",
-          "label": "S&P/ASX 200",
-          "target": 0.0
-        },
-        {
-          "symbol": "^BSESN",
-          "label": "BSE SENSEX",
-          "target": 0.0
-        },
-        {
-          "symbol": "^BVSP",
-          "label": "Ibovespa",
-          "target": 0.0
-        },
-        {
-          "symbol": "XU100.IS",
-          "label": "BIST 100",
-          "target": 0.0
-        }
-      ]
+      ],
+      "family": "Other"
     }
   ]
 }
