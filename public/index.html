@@ -86,7 +86,7 @@ pre{white-space:pre-wrap;word-break:break-word}
     <div><label>&nbsp;</label><button id="runConstruction" class="primary">Run Construction</button></div>
   </div>
 
-  <div id="statusText" class="status">Ready.</div>
+  <div id="statusText" class="status">Ready.</div><div id="diagBox" class="card" style="display:none;margin-bottom:18px"><h2>Data Diagnostics</h2><pre id="diagPre" class="small muted"></pre></div>
 
   <div class="tabs">
     <button class="tab-btn active-tab" data-tab="overviewTab">Overview</button>
@@ -393,8 +393,23 @@ function renderSnapshotTables(){
 async function fetchJson(url){
   const res = await fetch(url);
   const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Request failed");
+  if (!res.ok) {
+    const detail = data.detail;
+    if (typeof detail === "string") throw new Error(detail);
+    throw new Error((detail && detail.message) ? detail.message : "Request failed");
+  }
   return data;
+}
+
+async function loadDiagnostics(){
+  try{
+    const data = await fetchJson(`/api/data-diagnostics?${params().toString()}`);
+    $("diagBox").style.display = "block";
+    $("diagPre").textContent = JSON.stringify(data, null, 2);
+  }catch(err){
+    $("diagBox").style.display = "block";
+    $("diagPre").textContent = "Diagnostics failed: " + err.message;
+  }
 }
 
 async function loadOverview(){
