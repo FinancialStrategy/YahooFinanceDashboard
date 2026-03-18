@@ -394,7 +394,7 @@
       <div class="toolbar">
         <label for="group-filter">Asset Class:</label>
         <select id="group-filter">
-          <option value="ALL">All Assets</option>
+          <option value="ALL">All Groups</option>
         </select>
         <button id="refresh-btn">Refresh</button>
       </div>
@@ -582,6 +582,8 @@
             <option value="max_quadratic_utility">Max Quadratic Utility</option>
             <option value="efficient_risk">Efficient Risk</option>
             <option value="efficient_return">Efficient Return</option>
+            <option value="black_litterman_max_sharpe">Black-Litterman Max Sharpe</option>
+            <option value="black_litterman_min_volatility">Black-Litterman Min Volatility</option>
             <option value="hrp">Hierarchical Risk Parity</option>
             <option value="cla_max_sharpe">CLA Max Sharpe</option>
             <option value="cla_min_volatility">CLA Min Volatility</option>
@@ -604,7 +606,24 @@
         </div>
 
         <div class="small-note">
-          Construction outputs are computed for the instruments currently shown by the top Asset Class filter. For cross-asset allocation constraints, choose “All Assets”.
+          Construction outputs are computed for the instruments currently shown by the top Asset Class filter. For cross-asset allocation constraints, choose “All Groups”.
+        </div>
+
+        <div class="two-col" style="margin-bottom:16px;">
+          <div class="panel-box">
+            <div class="section-title">Black-Litterman Asset-Class Views</div>
+            <div class="small-note">
+              Her asset class için beklenen göreli görüşünü yıllık yüzde olarak gir. Pozitif değer overweight, negatif değer underweight etkisi yaratır.
+            </div>
+            <div id="bl-views-container"></div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">Hard Constraint Engine</div>
+            <div class="small-note">
+              Asset class bazlı min / max zorlayıcı sınırlar. Girilen değerler optimization aşamasında hard constraint olarak uygulanır.
+            </div>
+            <div id="group-bounds-container"></div>
+          </div>
         </div>
 
         <div class="kpi-grid">
@@ -1075,41 +1094,34 @@
       renderClassTargetControls();
     }
 
-    async function loadUniverse(preferredGroup = null) {
-      let groups = [];
-
+    async function loadUniverse() {
+      const filter = document.getElementById("group-filter");
+      const previous = filter?.value || "ALL";
       try {
         const res = await fetch("/api/universe");
-        if (!res.ok) throw new Error(`Universe request failed: ${res.status}`);
         const data = await res.json();
-        groups = (data.groups || []).map(g => g.name).filter(Boolean);
-      } catch (err) {
-        console.warn("/api/universe unavailable, will derive groups from snapshot.", err);
+        allGroups = (data.groups || []).map(g => g.name).filter(Boolean);
+      } catch (e) {
+        allGroups = [];
       }
 
-      if ((!groups || !groups.length) && Array.isArray(allRows) && allRows.length) {
-        groups = [...new Set(allRows.map(r => r.group).filter(Boolean))].sort();
+      if (filter) {
+        filter.innerHTML = `<option value="ALL">All Assets</option>`;
+        allGroups.forEach(g => {
+          const opt = document.createElement("option");
+          opt.value = g;
+          opt.textContent = g;
+          filter.appendChild(opt);
+        });
+        filter.value = allGroups.includes(previous) ? previous : "ALL";
       }
 
-      allGroups = groups;
-      const filter = document.getElementById("group-filter");
-      const currentValue = preferredGroup || filter.value || "ALL";
-      filter.innerHTML = `<option value="ALL">All Assets</option>`;
-
-      allGroups.forEach(g => {
-        const opt = document.createElement("option");
-        opt.value = g;
-        opt.textContent = g;
-        filter.appendChild(opt);
-      });
-
-      const finalValue = (currentValue !== "ALL" && allGroups.includes(currentValue)) ? currentValue : "ALL";
-      filter.value = finalValue;
       document.getElementById("group-count").textContent = allGroups.length;
+      renderGroupViewsControls();
+      renderGroupBoundsControls();
     }
 
     async function loadSnapshot(force = false) {
-      const currentSelection = currentGroupFilter();
       const url = force ? "/api/snapshot?force=true" : "/api/snapshot";
       const res = await fetch(url);
       const data = await res.json();
@@ -1118,12 +1130,32 @@
       allRows = data.rows || [];
       applySavedWeights(allRows, previousRows);
 
-      // Fallback: derive classes directly from snapshot rows if universe-based filter was empty.
-      await loadUniverse(currentSelection);
+      const snapshotGroups = [...new Set((allRows || []).map(r => r.group).filter(Boolean))].sort();
+      if ((!allGroups || !allGroups.length) && snapshotGroups.length) {
+        allGroups = snapshotGroups;
+      } else {
+        allGroups = [...new Set([...(allGroups || []), ...snapshotGroups])].sort();
+      }
 
+      const filter = document.getElementById("group-filter");
+      const previous = filter?.value || "ALL";
+      if (filter) {
+        filter.innerHTML = `<option value="ALL">All Assets</option>`;
+        allGroups.forEach(g => {
+          const opt = document.createElement("option");
+          opt.value = g;
+          opt.textContent = g;
+          filter.appendChild(opt);
+        });
+        filter.value = allGroups.includes(previous) ? previous : "ALL";
+      }
+
+      document.getElementById("group-count").textContent = allGroups.length;
       document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
       buildRows(currentGroupFilter());
       populateTechnicalSymbolSelector();
+      renderGroupViewsControls();
+      renderGroupBoundsControls();
     }
     function computeGroupTargets(rows) {
       const out = {};
@@ -1329,6 +1361,117 @@
       });
     }
 
+
+    function renderGroupViewsControls() {
+      const container = document.getElementById("bl-views-container");
+      if (!container) return;
+      const groups = (allGroups && allGroups.length ? allGroups : [...new Set((allRows || []).map(r => r.group || "Unknown"))]).sort();
+      if (!groups.length) {
+        container.innerHTML = `<div class="small-note">No asset classes available.</div>`;
+        return;
+      }
+      container.innerHTML = `
+        <div class="table-shell" style="max-height:320px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Asset Class</th>
+                <th class="right-text">View (%)</th>
+                <th class="right-text">Confidence (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${groups.map(g => `
+                <tr>
+                  <td>${g}</td>
+                  <td class="right-text"><input type="number" step="0.5" min="-30" max="30" value="0" data-bl-view="${escapeAttr(g)}" style="width:100px;"></td>
+                  <td class="right-text"><input type="number" step="1" min="5" max="99" value="55" data-bl-confidence="${escapeAttr(g)}" style="width:100px;"></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderGroupBoundsControls() {
+      const container = document.getElementById("group-bounds-container");
+      if (!container) return;
+      const groups = (allGroups && allGroups.length ? allGroups : [...new Set((allRows || []).map(r => r.group || "Unknown"))]).sort();
+      if (!groups.length) {
+        container.innerHTML = `<div class="small-note">No asset classes available.</div>`;
+        return;
+      }
+      const currentMix = computeGroupTargets(filteredRows());
+      container.innerHTML = `
+        <div class="table-shell" style="max-height:320px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Asset Class</th>
+                <th class="right-text">Current %</th>
+                <th class="right-text">Min %</th>
+                <th class="right-text">Max %</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${groups.map(g => {
+                const cur = Number(currentMix[g] || 0);
+                const minv = Math.max(0, Math.min(cur * 0.6, 100));
+                const maxv = Math.max(minv, Math.min(cur * 1.4 + 5, 100));
+                return `
+                <tr>
+                  <td>${g}</td>
+                  <td class="right-text">${cur.toFixed(2)}%</td>
+                  <td class="right-text"><input type="number" step="0.5" min="0" max="100" value="${minv.toFixed(1)}" data-bound-min="${escapeAttr(g)}" style="width:90px;"></td>
+                  <td class="right-text"><input type="number" step="0.5" min="0" max="100" value="${maxv.toFixed(1)}" data-bound-max="${escapeAttr(g)}" style="width:90px;"></td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function collectGroupViews() {
+      const views = {};
+      document.querySelectorAll("[data-bl-view]").forEach(inp => {
+        const g = inp.getAttribute("data-bl-view");
+        const v = Number(inp.value || 0);
+        if (Math.abs(v) > 1e-9) views[g] = v / 100.0;
+      });
+      return views;
+    }
+
+    function collectViewConfidences() {
+      const conf = {};
+      document.querySelectorAll("[data-bl-confidence]").forEach(inp => {
+        const g = inp.getAttribute("data-bl-confidence");
+        const v = Number(inp.value || 0);
+        if (v > 0) conf[g] = v / 100.0;
+      });
+      return conf;
+    }
+
+    function collectGroupBounds() {
+      const mins = {};
+      const maxs = {};
+      document.querySelectorAll("[data-bound-min]").forEach(inp => {
+        mins[inp.getAttribute("data-bound-min")] = (Number(inp.value || 0) / 100);
+      });
+      document.querySelectorAll("[data-bound-max]").forEach(inp => {
+        maxs[inp.getAttribute("data-bound-max")] = (Number(inp.value || 0) / 100);
+      });
+      const groups = Array.from(new Set([...Object.keys(mins), ...Object.keys(maxs)]));
+      const out = {};
+      groups.forEach(g => {
+        const mn = Math.max(0, Number(mins[g] || 0));
+        const mx = Math.min(1, Number(maxs[g] ?? 1));
+        if (mn <= mx) out[g] = { min: mn, max: mx };
+      });
+      return out;
+    }
+
     function basePayload() {
       const rows = filteredRows();
       const minW = (parseFloat(document.getElementById("min-weight")?.value) || 0) / 100;
@@ -1345,6 +1488,9 @@
         target_return: (parseFloat(document.getElementById("target-return").value) || 12) / 100,
         user_weights: userWeights,
         group_targets: (classTargetsToFractions(rows) || computeGroupTargets(rows)),
+        group_bounds: collectGroupBounds(),
+        group_views: collectGroupViews(),
+        view_confidences: collectViewConfidences(),
         min_weight: minW,
         max_weight: maxW
       };
@@ -1358,6 +1504,8 @@
         max_quadratic_utility: "Max Quadratic Utility",
         efficient_risk: "Efficient Risk",
         efficient_return: "Efficient Return",
+        black_litterman_max_sharpe: "Black-Litterman Max Sharpe",
+        black_litterman_min_volatility: "Black-Litterman Min Volatility",
         hrp: "HRP",
         cla_max_sharpe: "CLA Max Sharpe",
         cla_min_volatility: "CLA Min Volatility"
@@ -1557,7 +1705,9 @@ async function runOptimization() {
         renderAllocationDonut(data);
         renderWeightsTable(data);
 
-        status.textContent = `Construction complete · Asset class: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length}`;
+        const usedBounds = Object.keys(basePayload().group_bounds || {}).length;
+        const usedViews = Object.keys(basePayload().group_views || {}).length;
+        status.textContent = `Construction complete · Asset class: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length} · Bounds: ${usedBounds} · Views: ${usedViews}`;
       } catch (err) {
         status.textContent = `Construction error: ${err.message}`;
       } finally {
@@ -2082,6 +2232,8 @@ async function runOptimization() {
       updateWeightTotal();
       populateForecastSymbolSelector();
       populateTechnicalSymbolSelector();
+      renderGroupViewsControls();
+      renderGroupBoundsControls();
     });
 
     document.getElementById("refresh-btn").addEventListener("click", async () => {
