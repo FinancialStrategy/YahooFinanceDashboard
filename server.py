@@ -641,6 +641,8 @@ def build_portfolio_context(payload):
     target_volatility = float(payload.get("target_volatility", 0.15))
     target_return = float(payload.get("target_return", 0.10))
     symbols = resolve_symbols(payload)
+    if not symbols:
+        raise RuntimeError("No instruments matched the selected Asset Class filter.")
 
     # Prior weights (from UI) and asset-class targets (optional)
     prior_weights_input = payload.get("user_weights") or payload.get("prior_weights") or {}
@@ -664,7 +666,9 @@ def build_portfolio_context(payload):
         group_targets_input = tmp.groupby(tmp.index).sum().to_dict()
 
     if len(symbols) < 3:
-        raise RuntimeError("At least 3 assets are required for portfolio construction")
+        min_required_assets = 1 if strategy == "prior_only" else 2
+    if len(symbols) < min_required_assets:
+        raise RuntimeError(f"The selected asset-class universe contains only {len(symbols)} instrument(s). {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering.'}")
 
     labels = label_map()
     price_symbols = symbols + [BENCHMARK_SYMBOL]
@@ -676,8 +680,8 @@ def build_portfolio_context(payload):
     benchmark_prices = price_df[BENCHMARK_SYMBOL].copy()
     prices = price_df.drop(columns=[BENCHMARK_SYMBOL], errors="ignore")
 
-    if prices.shape[1] < 3:
-        raise RuntimeError("Not enough assets available after cleaning")
+    if prices.shape[1] < min_required_assets:
+        raise RuntimeError(f"Only {prices.shape[1]} instrument(s) remained after price-data cleaning. {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering and data cleaning.'}")
 
     mu, cov_matrix, weights, perf, frontier = optimize_with_strategy(
         prices=prices,
