@@ -436,9 +436,13 @@
 
     <div class="content-area">
       <div class="toolbar">
-        <label for="group-filter">Asset Class:</label>
-        <select id="group-filter">
+        <label for="family-filter">Asset Family:</label>
+        <select id="family-filter">
           <option value="ALL">All Assets</option>
+        </select>
+        <label for="group-filter">Sub-Class:</label>
+        <select id="group-filter">
+          <option value="ALL">All Sub-Classes</option>
         </select>
         <button id="refresh-btn">Refresh</button>
       </div>
@@ -648,7 +652,7 @@
         </div>
 
         <div class="small-note">
-          Construction outputs are computed for the instruments currently shown by the top Asset Class filter. For cross-asset allocation constraints, choose “All Assets”.
+          Construction outputs are computed for the instruments currently shown by the Asset Family and Sub-Class filters. Use “All Assets” + “All Sub-Classes” for the full universe, or narrow the universe step by step.
         </div>
 
         <div class="section-block" style="margin-top:12px;">
@@ -1009,13 +1013,37 @@
       return `chart-${String(symbol).replace(/[^A-Za-z0-9_-]/g, "")}`;
     }
 
+    function currentFamilyFilter() {
+      return document.getElementById("family-filter")?.value || "ALL";
+    }
+
     function currentGroupFilter() {
-      return document.getElementById("group-filter").value || "ALL";
+      return document.getElementById("group-filter")?.value || "ALL";
     }
 
     function filteredRows() {
+      const ff = currentFamilyFilter();
       const gf = currentGroupFilter();
-      return gf === "ALL" ? allRows : allRows.filter(r => r.group === gf);
+      return allRows.filter(r => {
+        const familyOk = ff === "ALL" || (r.family || inferFamilyFromGroup(r.group)) === ff;
+        const groupOk = gf === "ALL" || r.group === gf;
+        return familyOk && groupOk;
+      });
+    }
+
+    function inferFamilyFromGroup(name) {
+      if (!name) return "Unknown";
+      if (name.startsWith("Futures")) return "Futures";
+      if (name.startsWith("Major Crypto")) return "Major Crypto";
+      if (name.startsWith("MSCI Emerging Markets")) return "MSCI Emerging Markets";
+      if (name.startsWith("Major World Indices")) return "Major World Indices";
+      if (name.startsWith("Equity ETF")) return "Equity ETF";
+      if (name.startsWith("Country ETF")) return "Country ETF";
+      if (name.startsWith("Fixed Income ETF") || name.startsWith("Emerging Market Bond ETF") || name.startsWith("Inflation / Floating / Cash ETF")) return "Fixed Income ETF";
+      if (name.startsWith("Real Assets ETF")) return "Real Assets ETF";
+      if (name.startsWith("Commodity ETF") || name.startsWith("Precious Metals ETF")) return "Commodity ETF";
+      if (name.startsWith("Alternative Strategy ETF")) return "Alternative Strategy ETF";
+      return name.split(" - ")[0];
     }
 
     function initializeWeights(rows) {
@@ -1180,11 +1208,11 @@
       }
     }
 
-    function buildRows(filterValue = "ALL") {
+    function buildRows() {
       const tbody = document.getElementById("table-body");
       tbody.innerHTML = "";
 
-      const rows = filterValue === "ALL" ? allRows : allRows.filter(r => r.group === filterValue);
+      const rows = filteredRows();
 
       const groupMap = {};
       rows.forEach(r => {
@@ -1238,19 +1266,46 @@
     async function loadUniverse() {
       const res = await fetch("/api/universe");
       const data = await res.json();
-      allGroups = data.groups.map(g => g.name);
+      allGroupMeta = (data.groups || []).map(g => ({
+        name: g.name,
+        family: g.family || inferFamilyFromGroup(g.name)
+      }));
 
+      allFamilies = [...new Set(allGroupMeta.map(g => g.family))].sort();
+      allGroups = allGroupMeta.map(g => g.name);
+
+      const familyFilter = document.getElementById("family-filter");
+      familyFilter.innerHTML = `<option value="ALL">All Assets</option>`;
+      allFamilies.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = f;
+        familyFilter.appendChild(opt);
+      });
+
+      populateSubClassFilter();
+      document.getElementById("group-count").textContent = allGroups.length;
+    }
+
+    function populateSubClassFilter() {
+      const family = currentFamilyFilter();
       const filter = document.getElementById("group-filter");
-      filter.innerHTML = `<option value="ALL">All Assets</option>`;
+      const prev = filter.value || "ALL";
+      filter.innerHTML = `<option value="ALL">All Sub-Classes</option>`;
 
-      allGroups.forEach(g => {
+      const groups = allGroupMeta
+        .filter(g => family === "ALL" || g.family === family)
+        .map(g => g.name)
+        .sort();
+
+      groups.forEach(g => {
         const opt = document.createElement("option");
         opt.value = g;
         opt.textContent = g;
         filter.appendChild(opt);
       });
 
-      document.getElementById("group-count").textContent = allGroups.length;
+      filter.value = groups.includes(prev) ? prev : "ALL";
     }
 
     async function loadSnapshot(force = false) {
@@ -1259,11 +1314,11 @@
       const data = await res.json();
 
       const previousRows = [...allRows];
-      allRows = data.rows || [];
+      allRows = (data.rows || []).map(r => ({...r, family: r.family || inferFamilyFromGroup(r.group)}));
       applySavedWeights(allRows, previousRows);
 
       document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
-      buildRows(currentGroupFilter());
+      buildRows();
       populateTechnicalSymbolSelector();
       renderSelectedInstrumentsTable();
     }
@@ -1443,7 +1498,7 @@
         rows.forEach(r => { r.current_weight = (Math.max(Number(r.current_weight) || 0, 0) / totalW) * 100; });
       }
 
-      buildRows(currentGroupFilter());
+      buildRows();
       renderClassTargetControls();
       if (statusEl) statusEl.textContent = "Applied class targets to instruments proportionally (weights renormalized to 100%).";
     }
@@ -1481,7 +1536,7 @@
 
       return {
         symbols: rows.map(r => r.symbol),
-        group_filter: currentGroupFilter(),
+        group_filter: currentGroupFilter() !== "ALL" ? currentGroupFilter() : currentFamilyFilter(),
         strategy: document.getElementById("opt-strategy").value,
         target_volatility: (parseFloat(document.getElementById("target-volatility").value) || 15) / 100,
         target_return: (parseFloat(document.getElementById("target-return").value) || 12) / 100,
@@ -1680,7 +1735,7 @@ async function runOptimization() {
       const status = document.getElementById("construction-status");
       btn.disabled = true;
       btn.textContent = "Running...";
-      status.textContent = `Portfolio construction is running for asset class: ${currentGroupFilter()}`;
+      status.textContent = `Portfolio construction is running for universe filter: ${currentGroupFilter()}`;
 
       try {
         const res = await fetch("/api/optimization", {
@@ -1699,7 +1754,7 @@ async function runOptimization() {
         renderAllocationDonut(data);
         renderWeightsTable(data);
 
-        status.textContent = `Construction complete · Asset class: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length}`;
+        status.textContent = `Construction complete · Universe filter: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length}`;
       } catch (err) {
         status.textContent = `Construction error: ${err.message}`;
       } finally {
@@ -1835,7 +1890,7 @@ async function runOptimization() {
       const status = document.getElementById("analytics-status");
       btn.disabled = true;
       btn.textContent = "Running...";
-      status.textContent = `Analytics are running for asset class: ${currentGroupFilter()}`;
+      status.textContent = `Analytics are running for universe filter: ${currentGroupFilter()}`;
 
       try {
         const res = await fetch("/api/analytics", {
@@ -1855,7 +1910,7 @@ async function runOptimization() {
         plotRelativePerformance(data.relative_performance || []);
         plotRollingIR(data.rolling_information_ratio || []);
 
-        status.textContent = `Analytics complete · Asset class: ${currentGroupFilter()}`;
+        status.textContent = `Analytics complete · Universe filter: ${currentGroupFilter()}`;
       } catch (err) {
         status.textContent = `Analytics error: ${err.message}`;
       } finally {
@@ -1924,7 +1979,7 @@ async function runOptimization() {
       const status = document.getElementById("risk-status");
       btn.disabled = true;
       btn.textContent = "Running...";
-      status.textContent = `Risk dashboard is running for asset class: ${currentGroupFilter()}`;
+      status.textContent = `Risk dashboard is running for universe filter: ${currentGroupFilter()}`;
 
       try {
         const payload = {
@@ -1954,7 +2009,7 @@ async function runOptimization() {
         renderRiskContributionBar(data.risk_contributions || []);
         renderCorrelationHeatmap(data.correlation_heatmap || { x: [], y: [], z: [] });
 
-        status.textContent = `Risk dashboard complete · Asset class: ${currentGroupFilter()} · Horizon: ${c.horizon_days || payload.horizon_days} day(s)`;
+        status.textContent = `Risk dashboard complete · Universe filter: ${currentGroupFilter()} · Horizon: ${c.horizon_days || payload.horizon_days} day(s)`;
       } catch (err) {
         status.textContent = `Risk dashboard error: ${err.message}`;
       } finally {
@@ -1986,11 +2041,11 @@ async function runOptimization() {
       const status = document.getElementById("forecast-status");
       btn.disabled = true;
       btn.textContent = "Running...";
-      status.textContent = `Forecast is running for asset class: ${currentGroupFilter()}`;
+      status.textContent = `Forecast is running for universe filter: ${currentGroupFilter()}`;
 
       try {
         const payload = {
-          group_filter: currentGroupFilter(),
+          group_filter: currentGroupFilter() !== "ALL" ? currentGroupFilter() : currentFamilyFilter(),
           symbol: document.getElementById("forecast-symbol").value,
           lookback: parseInt(document.getElementById("forecast-lookback").value || "30"),
           forecast_horizon: parseInt(document.getElementById("forecast-horizon").value || "20")
@@ -2033,7 +2088,7 @@ async function runOptimization() {
           plot_bgcolor: "#f8f8f8"
         }, { responsive: true, displayModeBar: true });
 
-        status.textContent = `Forecast complete · Asset class: ${currentGroupFilter()} · Symbol: ${data.symbol}`;
+        status.textContent = `Forecast complete · Universe filter: ${currentGroupFilter()} · Symbol: ${data.symbol}`;
       } catch (err) {
         status.textContent = `Forecast error: ${err.message}`;
       } finally {
@@ -2219,7 +2274,7 @@ async function runOptimization() {
     }
 
     document.getElementById("group-filter").addEventListener("change", () => {
-      buildRows(currentGroupFilter());
+      buildRows();
       updateOverviewCards(filteredRows());
       updateWeightTotal();
       populateForecastSymbolSelector();
