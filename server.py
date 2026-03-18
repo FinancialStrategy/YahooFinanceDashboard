@@ -1,1406 +1,257 @@
-from fastapi import FastAPI, HTTPException, Body
+from __future__ import annotations
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 import json
-import time
-import warnings
+import math
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from scipy.stats import norm
-from hmmlearn.hmm import GaussianHMM
-from sklearn.linear_model import LinearRegression
-
-try:
-    import cvxpy as cp
-except Exception:
-    cp = None
-
-
-try:
-    import quantstats as qs
-except Exception:
-    qs = None
-
-from pypfopt import EfficientFrontier, expected_returns, risk_models
-from pypfopt import objective_functions
-from pypfopt.hierarchical_portfolio import HRPOpt
-from pypfopt.cla import CLA
-try:
-    from pypfopt import black_litterman
-except Exception:
-    black_litterman = None
-
-warnings.filterwarnings("ignore")
 
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
-INDEX_FILE = PUBLIC_DIR / "index.html"
-if not INDEX_FILE.exists():
-    INDEX_FILE = BASE_DIR / "index.html"
-if not INDEX_FILE.exists():
-    alt = BASE_DIR / "index_FINAL_v2_FEASIBILITY.html"
-    if alt.exists():
-        INDEX_FILE = alt
+INDEX_FILE = PUBLIC_DIR / "index.html" if (PUBLIC_DIR / "index.html").exists() else BASE_DIR / "index.html"
 UNIVERSE_FILE = BASE_DIR / "universe.json"
-if not UNIVERSE_FILE.exists():
-    alt_universe = BASE_DIR / "universe_institutional_etf.json"
-    if alt_universe.exists():
-        UNIVERSE_FILE = alt_universe
 
-app = FastAPI(title="Institutional Quant Platform")
-
-RISK_FREE_RATE = 0.035
-BENCHMARK_SYMBOL = "^GSPC"
 TRADING_DAYS = 252
 
-MAJOR_WORLD_INDICES = [
-    {"symbol": "^GSPC", "label": "S&P 500", "group": "North America"},
-    {"symbol": "^DJI", "label": "Dow Jones Industrial Average", "group": "North America"},
-    {"symbol": "^IXIC", "label": "NASDAQ Composite", "group": "North America"},
-    {"symbol": "^RUT", "label": "Russell 2000", "group": "North America"},
-    {"symbol": "^FTSE", "label": "FTSE 100", "group": "Europe"},
-    {"symbol": "^GDAXI", "label": "DAX", "group": "Europe"},
-    {"symbol": "^FCHI", "label": "CAC 40", "group": "Europe"},
-    {"symbol": "^STOXX50E", "label": "EURO STOXX 50", "group": "Europe"},
-    {"symbol": "^N225", "label": "Nikkei 225", "group": "Asia Pacific"},
-    {"symbol": "^HSI", "label": "Hang Seng Index", "group": "Asia Pacific"},
-    {"symbol": "000001.SS", "label": "Shanghai Composite", "group": "Asia Pacific"},
-    {"symbol": "^AXJO", "label": "S&P/ASX 200", "group": "Asia Pacific"},
-    {"symbol": "^BSESN", "label": "BSE SENSEX", "group": "Asia Pacific"},
-    {"symbol": "^BVSP", "label": "Ibovespa", "group": "Latin America"},
-    {"symbol": "^MXX", "label": "IPC Mexico", "group": "Latin America"},
-    {"symbol": "XU100.IS", "label": "BIST 100", "group": "Türkiye"}
-]
-EM_BENCHMARK_SYMBOLS = ["EEM", "IEMG", "VWO", "SPEM"]
-TURKEY_EQUITY_SYMBOLS = ["TUR"]
-TURKEY_BOND_PROXY_SYMBOLS = ["EMB", "EMLC", "EMHY", "EMBX", "LEMB"]
-
-CACHE = {
-    "snapshot": None,
-    "timestamp": 0
-}
-CACHE_TTL_SECONDS = 600
+app = FastAPI(title="Institutional Portfolio Dashboard")
 
 
-def load_universe():
+def load_universe() -> dict:
     with open(UNIVERSE_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def flatten_universe(universe_dict):
+def flatten_universe(universe_dict: dict) -> List[dict]:
     rows = []
-    for group in universe_dict["groups"]:
+    for group in universe_dict.get("groups", []):
         family = group.get("family", "Other")
-        for item in group["items"]:
+        subgroup = group.get("name", "Unknown")
+        color = group.get("color", "#64748b")
+        for item in group.get("items", []):
             rows.append({
                 "family": family,
-                "group": group["name"],
-                "group_color": group["color"],
-                "symbol": item["symbol"],
-                "label": item["label"],
-                "target": item["target"]
+                "group": subgroup,
+                "group_color": color,
+                "symbol": item.get("symbol"),
+                "label": item.get("label"),
+                "target": float(item.get("target", 0.0))
             })
     return rows
 
 
-def symbols_for_group(group_filter, family_filter="ALL"):
-    universe = load_universe()
-    items = flatten_universe(universe)
-
-    rows = items
-    if family_filter and family_filter != "ALL":
-        rows = [x for x in rows if x.get("family") == family_filter]
-
-    if not group_filter or group_filter == "ALL":
-        return [x["symbol"] for x in rows]
-
-    return [x["symbol"] for x in rows if x["group"] == group_filter]
-
-
-def label_map():
-    universe = load_universe()
-    items = flatten_universe(universe)
-    return {x["symbol"]: x["label"] for x in items}
-
-
-def symbol_group_map():
-    universe = load_universe()
-    mapping = {}
-    for group in universe.get("groups", []):
-        gname = group.get("name", "Unknown")
-        for item in group.get("items", []):
-            mapping[item.get("symbol")] = gname
-    return mapping
-
-def symbol_family_map():
-    universe = load_universe()
-    mapping = {}
-    for group in universe.get("groups", []):
-        family = group.get("family", "Other")
-        for item in group.get("items", []):
-            mapping[item.get("symbol")] = family
-    return mapping
-
-
-def normalize_weight_dict(weight_dict, symbols):
-    """
-    Normalize a dict of weights to sum to 1.0 and align to `symbols`.
-    Accepts inputs either in fractions (0-1) or percents (0-100).
-    """
-    if not isinstance(weight_dict, dict):
-        weight_dict = {}
-    vals = {s: float(weight_dict.get(s, 0.0)) for s in symbols}
-    mx = max(vals.values()) if vals else 0.0
-    if mx > 1.5:
-        vals = {k: v / 100.0 for k, v in vals.items()}
-    total = sum(max(v, 0.0) for v in vals.values())
-    if total <= 0:
-        # equal-weight fallback
-        eq = 1.0 / max(len(symbols), 1)
-        return {s: eq for s in symbols}
-    vals = {k: max(v, 0.0) / total for k, v in vals.items()}
-    return vals
-
-
-def group_weight_breakdown(weight_series: pd.Series, group_map: dict):
-    rows = []
-    if weight_series is None or weight_series.empty:
-        return rows
-    tmp = weight_series.copy()
-    tmp.index = [group_map.get(s, "Unknown") for s in tmp.index]
-    by_group = tmp.groupby(tmp.index).sum().sort_values(ascending=False)
-    for g, w in by_group.items():
-        rows.append({"group": str(g), "weight": float(w)})
+def get_rows(family: str = "ALL", group: str = "ALL", include_reference: bool = False) -> List[dict]:
+    rows = flatten_universe(load_universe())
+    if family != "ALL":
+        rows = [r for r in rows if r["family"] == family]
+    if group != "ALL":
+        rows = [r for r in rows if r["group"] == group]
+    if not include_reference:
+        rows = [r for r in rows if r["family"] != "World Indices"]
     return rows
 
 
-def align_weights_for_risk(returns: pd.DataFrame, weight_series: pd.Series, min_abs=1e-10):
-    """
-    Align weights to returns columns, drop flat/empty series, renormalize.
-    Returns aligned weight series and aligned returns dataframe.
-    """
-    if returns is None or returns.empty:
-        raise RuntimeError("Not enough return data to compute risk contributions.")
-    if weight_series is None or weight_series.empty:
-        raise RuntimeError("Weights sum to zero after alignment.")
-
-    # Keep only columns with finite variance
-    r = returns.copy().dropna(how="all")
-    var = r.var(skipna=True)
-    keep = var[var > 0].index.tolist()
-    if len(keep) < 2:
-        raise RuntimeError("Too many flat assets after cleaning.")
-
-    r = r[keep].dropna()
-
-    w = weight_series.reindex(r.columns).fillna(0.0)
-    w = w[w.abs() > min_abs]
-    if w.empty or float(w.sum()) == 0.0:
-        raise RuntimeError("Weights sum to zero after alignment.")
-    w = w / float(w.sum())
-
-    # align returns to the remaining weight set
-    r = r[w.index].dropna()
-    if r.shape[1] < 2 or len(r) < 60:
-        raise RuntimeError("Not enough return data to compute risk contributions.")
-    return r, w
-
-
-def safe_pct_return(series: pd.Series, lookback: int):
-    series = series.dropna()
-    if len(series) <= lookback:
-        return None
-    start = float(series.iloc[-lookback - 1])
-    end = float(series.iloc[-1])
-    if start == 0:
-        return None
-    return (end / start - 1.0) * 100.0
-
-
-def ytd_return(series: pd.Series):
-    series = series.dropna()
-    if len(series) < 2:
-        return None
-
-    latest_date = pd.to_datetime(series.index[-1])
-    year_start = pd.Timestamp(year=latest_date.year, month=1, day=1)
-    series_ytd = series[series.index >= year_start]
-
-    if len(series_ytd) < 2:
-        return None
-
-    start = float(series_ytd.iloc[0])
-    end = float(series_ytd.iloc[-1])
-    if start == 0:
-        return None
-    return (end / start - 1.0) * 100.0
-
-
-def annualized_volatility(close_series: pd.Series, window: int = 30):
-    close_series = close_series.dropna()
-    if len(close_series) < window + 1:
-        return None
-    log_returns = np.log(close_series / close_series.shift(1)).dropna().tail(window)
-    if len(log_returns) < 2:
-        return None
-    return float(log_returns.std() * np.sqrt(TRADING_DAYS) * 100.0)
-
-
-def avg_volume(volume_series: pd.Series, window: int = 20):
-    volume_series = volume_series.dropna()
-    if len(volume_series) < 1:
-        return None
-    return float(volume_series.tail(window).mean())
-
-
-def extract_symbol_frame(download_df: pd.DataFrame, symbol: str, total_symbols: int):
-    if total_symbols == 1:
-        df = download_df.copy()
-        if isinstance(df.columns, pd.MultiIndex):
-            try:
-                df = df.xs(symbol, axis=1, level=0)
-            except Exception:
-                pass
-        return df
-
-    if isinstance(download_df.columns, pd.MultiIndex):
-        if symbol in download_df.columns.get_level_values(0):
-            return download_df[symbol].copy()
-
-    raise KeyError(f"Data not found for {symbol}")
-
-
-def download_price_matrix(symbols, period="2y", interval="1d"):
-    symbols = list(dict.fromkeys(symbols))
-
-    raw = yf.download(
-        tickers=symbols,
-        period=period,
-        interval=interval,
-        auto_adjust=True,
-        progress=False,
-        threads=True,
-        group_by="ticker"
-    )
-
-    if raw.empty:
-        raise RuntimeError("Yahoo Finance returned empty dataset")
-
-    close_df = pd.DataFrame()
-    total_symbols = len(symbols)
-
-    for symbol in symbols:
-        try:
-            sdf = extract_symbol_frame(raw, symbol, total_symbols).copy()
-            sdf = sdf.dropna(how="all")
-            if "Close" in sdf.columns:
-                close_df[symbol] = sdf["Close"]
-        except Exception:
-            continue
-
-    if close_df.empty:
-        raise RuntimeError("No valid close-price matrix could be built")
-
-    min_obs = max(120, int(0.65 * len(close_df)))
-    close_df = close_df.dropna(axis=1, thresh=min_obs)
-    close_df = close_df.sort_index().ffill().dropna()
-
-    if close_df.shape[1] < 1:
-        raise RuntimeError("Not enough valid symbols after cleaning")
-
-    return close_df
-
-
-def build_snapshot():
-    universe = load_universe()
-    items = flatten_universe(universe)
-    symbols = [x["symbol"] for x in items]
-
-    df = yf.download(
-        tickers=symbols,
-        period="2y",
-        interval="1d",
-        auto_adjust=True,
-        progress=False,
-        threads=True,
-        group_by="ticker"
-    )
-
-    if df.empty:
-        raise RuntimeError("Yahoo Finance returned empty dataset")
-
-    result_rows = []
-
-    for item in items:
-        symbol = item["symbol"]
-        try:
-            sdf = extract_symbol_frame(df, symbol, len(symbols)).copy()
-            sdf = sdf.dropna(how="all")
-            if sdf.empty or "Close" not in sdf.columns:
-                continue
-
-            close = sdf["Close"].dropna()
-            volume = sdf["Volume"].dropna() if "Volume" in sdf.columns else pd.Series(dtype=float)
-
-            if len(close) < 2:
-                continue
-
-            last_price = float(close.iloc[-1])
-            prev_close = float(close.iloc[-2])
-            daily_change_pct = ((last_price / prev_close) - 1.0) * 100.0 if prev_close != 0 else None
-
-            spark = close.tail(20).round(6).tolist()
-
-            row = {
-                "family": item.get("family", "Other"),
-                "group": item["group"],
-                "group_color": item["group_color"],
-                "symbol": item["symbol"],
-                "label": item["label"],
-                "target": item["target"],
-                "price": last_price,
-                "prev_close": prev_close,
-                "daily_change_pct": daily_change_pct,
-                "ret_1d_pct": daily_change_pct,
-                "ret_1w_pct": safe_pct_return(close, 5),
-                "ret_1m_pct": safe_pct_return(close, 21),
-                "ret_3m_pct": safe_pct_return(close, 63),
-                "ytd_pct": ytd_return(close),
-                "ret_6m_pct": safe_pct_return(close, 126),
-                "ret_1y_pct": safe_pct_return(close, 252),
-                "vol_30d_pct": annualized_volatility(close, 30),
-                "avg_volume_20d": avg_volume(volume, 20),
-                "sparkline": spark
-            }
-            result_rows.append(row)
-        except Exception:
-            continue
-
-    return {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
-        "count": len(result_rows),
-        "rows": result_rows
-    }
-
-
-
-def build_market_snapshot(items, period="2y"):
-    symbols = [x["symbol"] for x in items]
-    df = yf.download(
-        tickers=symbols,
-        period=period,
-        interval="1d",
-        auto_adjust=True,
-        progress=False,
-        threads=True,
-        group_by="ticker"
-    )
-    if df.empty:
-        raise RuntimeError("Yahoo Finance returned empty dataset for market snapshot")
-    result_rows = []
-    for item in items:
-        symbol = item["symbol"]
-        try:
-            sdf = extract_symbol_frame(df, symbol, len(symbols)).copy().dropna(how="all")
-            if sdf.empty or "Close" not in sdf.columns:
-                continue
-            close = sdf["Close"].dropna()
-            if len(close) < 2:
-                continue
-            last_price = float(close.iloc[-1])
-            prev_close = float(close.iloc[-2])
-            row = {
-                "group": item.get("group", "Market"),
-                "symbol": symbol,
-                "label": item.get("label", symbol),
-                "price": last_price,
-                "ret_1d_pct": ((last_price / prev_close) - 1.0) * 100.0 if prev_close != 0 else None,
-                "ret_1w_pct": safe_pct_return(close, 5),
-                "ret_1m_pct": safe_pct_return(close, 21),
-                "ret_3m_pct": safe_pct_return(close, 63),
-                "ytd_pct": ytd_return(close),
-                "ret_1y_pct": safe_pct_return(close, 252),
-                "vol_30d_pct": annualized_volatility(close, 30)
-            }
-            result_rows.append(row)
-        except Exception:
-            continue
-    return {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
-        "count": len(result_rows),
-        "rows": result_rows
-    }
-
-def clean_weight_dict(weights: dict):
-    out = {}
-    for k, v in weights.items():
-        fv = float(v)
-        if abs(fv) > 1e-8:
-            out[k] = round(fv, 6)
-    return dict(sorted(out.items(), key=lambda x: x[1], reverse=True))
-
-
-
-def build_frontier_points(mu, cov_matrix, weight_bounds=(0, 1)):
-    points = []
-    try:
-        ef_min = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
-        ef_min.min_volatility()
-        min_ret, min_vol, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-    except Exception:
-        return points
-
-    try:
-        ef_max = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
-        ef_max.max_sharpe(risk_free_rate=RISK_FREE_RATE)
-        max_ret, _, _ = ef_max.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-    except Exception:
-        max_ret = min_ret
-
-    if max_ret < min_ret:
-        min_ret, max_ret = max_ret, min_ret
-
-    grid = np.linspace(float(min_ret), float(max_ret), 20)
-    for tr in grid:
-        try:
-            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
-            ef.efficient_return(float(tr))
-            ret, vol, shp = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-            points.append({
-                "expected_return": float(ret),
-                "volatility": float(vol),
-                "sharpe": float(shp)
-            })
-        except Exception:
-            continue
-
-    if not points:
-        try:
-            points.append({
-                "expected_return": float(min_ret),
-                "volatility": float(min_vol),
-                "sharpe": float((min_ret - RISK_FREE_RATE) / min_vol) if min_vol > 0 else 0.0
-            })
-        except Exception:
-            pass
-    return points
-
-
-def _normalize_group_targets(group_targets):
-    if isinstance(group_targets, dict) and len(group_targets) > 0:
-        gt = {str(k): float(v) for k, v in group_targets.items()}
-        mx = max(gt.values()) if gt else 0.0
-        if mx > 1.5:
-            gt = {k: v / 100.0 for k, v in gt.items()}
-        tot = sum(max(v, 0.0) for v in gt.values())
-        if tot > 0:
-            return {k: max(v, 0.0) / tot for k, v in gt.items()}
-    return None
-
-
-def _normalize_group_bounds(group_bounds):
-    out = {}
-    if not isinstance(group_bounds, dict):
-        return out
-    for g, cfg in group_bounds.items():
-        if not isinstance(cfg, dict):
-            continue
-        mn = float(cfg.get("min", 0.0) or 0.0)
-        mx = float(cfg.get("max", 1.0) or 1.0)
-        if mx > 1.5:
-            mx /= 100.0
-        if mn > 1.5:
-            mn /= 100.0
-        mn = max(0.0, mn)
-        mx = min(1.0, mx)
-        if mn <= mx:
-            out[str(g)] = {"min": mn, "max": mx}
-    return out
-
-
-def _group_to_symbol_view(group_views, group_map, symbols):
-    if not isinstance(group_views, dict):
-        return {}
-    symbol_views = {}
-    for g, view in group_views.items():
-        try:
-            val = float(view)
-        except Exception:
-            continue
-        members = [s for s in symbols if group_map.get(s, "Unknown") == g]
-        if not members:
-            continue
-        per_symbol = val / len(members)
-        for s in members:
-            symbol_views[s] = symbol_views.get(s, 0.0) + per_symbol
-    return symbol_views
-
-
-def _apply_group_constraints(ef, symbols, group_map, group_targets=None, group_bounds=None):
-    if cp is None:
-        return ef
-    if group_targets:
-        for g, tgt in group_targets.items():
-            idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-            if idxs:
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
-    for g, bounds in (group_bounds or {}).items():
-        idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-        if not idxs:
-            continue
-        mn = float(bounds.get("min", 0.0))
-        mx = float(bounds.get("max", 1.0))
-        ef.add_constraint(lambda w, idxs=idxs, mn=mn: cp.sum(w[idxs]) >= mn)
-        ef.add_constraint(lambda w, idxs=idxs, mx=mx: cp.sum(w[idxs]) <= mx)
-    return ef
-
-
-def _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=None, view_confidences=None):
-    base_mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
-    if black_litterman is None or not group_views:
-        return base_mu
-
-    abs_views = _group_to_symbol_view(group_views, group_map, symbols)
-    if not abs_views:
-        return base_mu
-
-    try:
-        market_prior = black_litterman.market_implied_prior_returns(
-            market_caps={s: 1.0 for s in symbols},
-            risk_aversion=2.5,
-            cov_matrix=cov_matrix
-        )
-    except Exception:
-        market_prior = base_mu
-
-    conf_list = []
-    for s in abs_views.keys():
-        g = group_map.get(s, "Unknown")
-        c = None if not isinstance(view_confidences, dict) else view_confidences.get(g)
-        try:
-            c = float(c)
-        except Exception:
-            c = 0.5
-        if c > 1:
-            c = c / 100.0
-        conf_list.append(min(max(c, 0.05), 0.99))
-
-    try:
-        bl = black_litterman.BlackLittermanModel(
-            cov_matrix,
-            pi=market_prior,
-            absolute_views=abs_views,
-            view_confidences=np.array(conf_list, dtype=float)
-        )
-        posterior = bl.bl_returns()
-        return posterior.reindex(base_mu.index).fillna(base_mu)
-    except Exception:
-        return base_mu
-
-def optimize_with_strategy(prices, strategy, target_volatility, target_return, prior_weights=None, group_targets=None, min_weight=0.0, max_weight=1.0, group_map=None, group_bounds=None, group_views=None, view_confidences=None):
-    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
-    symbols = list(prices.columns)
-    if group_map is None:
-        group_map = symbol_group_map()
-    mu = _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=group_views, view_confidences=view_confidences) if strategy.startswith("black_litterman") else expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
-    rets = expected_returns.returns_from_prices(prices)
-
-    # Prior weights (optional)
-    if prior_weights is not None:
-        prior_weights = normalize_weight_dict(prior_weights, symbols)
-
-    # Group targets / bounds (optional)
-    group_targets = _normalize_group_targets(group_targets)
-    group_bounds = _normalize_group_bounds(group_bounds)
-
-    # A special mode: use prior weights as the portfolio (no optimization)
-    if strategy == "prior_only":
-        if prior_weights is None:
-            raise RuntimeError("Prior weights were not supplied.")
-        wvec = np.array([prior_weights[s] for s in symbols], dtype=float)
-        port_ret = float(mu.values @ wvec)
-        port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
-        sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
-        weights = {s: float(round(prior_weights[s], 6)) for s in symbols if prior_weights[s] > 1e-8}
-        perf = (port_ret, port_vol, sharpe)
-        frontier = build_frontier_points(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
-
-
-    if strategy == "max_sharpe":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "min_volatility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.min_volatility()
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "max_quadratic_utility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.max_quadratic_utility(risk_aversion=1.0)
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "efficient_risk":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.efficient_risk(target_volatility=float(target_volatility))
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "efficient_return":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.efficient_return(target_return=float(target_return))
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "black_litterman_max_sharpe":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "black_litterman_min_volatility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.min_volatility()
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "hrp":
-        hrp = HRPOpt(rets)
-        weights = hrp.optimize()
-        perf = hrp.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "cla_max_sharpe":
-        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        cla.max_sharpe()
-        weights = cla.clean_weights()
-        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "cla_min_volatility":
-        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        cla.min_volatility()
-        weights = cla.clean_weights()
-        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
-
-    frontier = build_frontier_points(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-    return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
-
-
-def resolve_symbols(payload):
-    symbols = payload.get("symbols", [])
-    family_filter = payload.get("family_filter", "ALL")
-    group_filter = payload.get("group_filter", "ALL")
-
-    if not symbols:
-        symbols = symbols_for_group(group_filter, family_filter)
-
-    allowed = set(symbols_for_group(group_filter, family_filter))
-    if allowed:
-        symbols = [s for s in symbols if s in allowed]
-
-    symbols = [s for s in symbols if s != BENCHMARK_SYMBOL]
-    symbols = list(dict.fromkeys(symbols))
-    return symbols
-
-
-def build_portfolio_context(payload):
-    strategy = payload.get("strategy", "max_sharpe")
-    target_volatility = float(payload.get("target_volatility", 0.15))
-    target_return = float(payload.get("target_return", 0.10))
-    symbols = resolve_symbols(payload)
-    if not symbols:
-        raise RuntimeError("No instruments matched the selected Asset Class filter.")
-
-    # Prior weights (from UI) and asset-class targets (optional)
-    prior_weights_input = payload.get("user_weights") or payload.get("prior_weights") or {}
-    group_targets_input = payload.get("group_targets") or {}
-    group_bounds_input = payload.get("group_bounds") or {}
-    group_views_input = payload.get("group_views") or {}
-    view_confidences_input = payload.get("view_confidences") or {}
-    min_weight = float(payload.get("min_weight", 0.0))
-    max_weight = float(payload.get("max_weight", 1.0))
-    if max_weight <= 0 or max_weight > 1:
-        max_weight = 1.0
-    if min_weight < 0 or min_weight >= max_weight:
-        min_weight = 0.0
-
-    group_map = symbol_group_map()
-    prior_weights = normalize_weight_dict(prior_weights_input, symbols)
-    # For convenience: if group targets are not provided, derive them from prior weights
-    if not group_targets_input:
-        tmp = pd.Series(prior_weights)
-        tmp.index = [group_map.get(s, "Unknown") for s in tmp.index]
-        group_targets_input = tmp.groupby(tmp.index).sum().to_dict()
-
-    if len(symbols) < 3:
-        min_required_assets = 1 if strategy == "prior_only" else 2
-    if len(symbols) < min_required_assets:
-        raise RuntimeError(f"The selected asset-class universe contains only {len(symbols)} instrument(s). {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering.'}")
-
-    labels = label_map()
-    price_symbols = symbols + [BENCHMARK_SYMBOL]
-    price_df = download_price_matrix(price_symbols, period="2y", interval="1d")
-
-    if BENCHMARK_SYMBOL not in price_df.columns:
-        raise RuntimeError("Benchmark could not be downloaded")
-
-    benchmark_prices = price_df[BENCHMARK_SYMBOL].copy()
-    prices = price_df.drop(columns=[BENCHMARK_SYMBOL], errors="ignore")
-
-    if prices.shape[1] < min_required_assets:
-        raise RuntimeError(f"Only {prices.shape[1]} instrument(s) remained after price-data cleaning. {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering and data cleaning.'}")
-
-    mu, cov_matrix, weights, perf, frontier = optimize_with_strategy(
-        prices=prices,
-        strategy=strategy,
-        target_volatility=target_volatility,
-        target_return=target_return,
-        prior_weights=prior_weights,
-        group_targets=group_targets_input,
-        min_weight=min_weight,
-        max_weight=max_weight,
-        group_map=group_map,
-        group_bounds=group_bounds_input,
-        group_views=group_views_input,
-        view_confidences=view_confidences_input
-    )
-
-    returns = prices.pct_change().dropna()
-    cov_returns = returns.cov() * TRADING_DAYS
-
-    benchmark_returns = benchmark_prices.pct_change().dropna()
-
-    weight_series = pd.Series(weights).reindex(prices.columns).fillna(0.0)
-    prior_weight_series = pd.Series(prior_weights).reindex(prices.columns).fillna(0.0)
-    portfolio_returns = returns.mul(weight_series, axis=1).sum(axis=1).dropna()
-
-    aligned = pd.concat(
-        [portfolio_returns.rename("portfolio"), benchmark_returns.rename("benchmark")],
-        axis=1
-    ).dropna()
-
-    beta = None
-    alpha_ann = None
-    tracking_error = None
-    information_ratio = None
-    benchmark_ann_return = None
-    benchmark_ann_vol = None
-
-    if not aligned.empty and aligned["benchmark"].var() != 0:
-        beta = float(aligned["portfolio"].cov(aligned["benchmark"]) / aligned["benchmark"].var())
-        rf_daily = RISK_FREE_RATE / TRADING_DAYS
-        alpha_ann = float(((aligned["portfolio"].mean() - rf_daily) - beta * (aligned["benchmark"].mean() - rf_daily)) * TRADING_DAYS)
-        diff = aligned["portfolio"] - aligned["benchmark"]
-        tracking_error = float(diff.std() * np.sqrt(TRADING_DAYS)) if diff.std() == diff.std() else None
-        information_ratio = float((diff.mean() * TRADING_DAYS) / tracking_error) if tracking_error and tracking_error != 0 else None
-        benchmark_ann_return = float(aligned["benchmark"].mean() * TRADING_DAYS)
-        benchmark_ann_vol = float(aligned["benchmark"].std() * np.sqrt(TRADING_DAYS))
-
-    asset_vol = returns.std() * np.sqrt(TRADING_DAYS)
-    asset_df = pd.DataFrame({
-        "symbol": prices.columns,
-        "label": [labels.get(sym, sym) for sym in prices.columns],
-        "expected_return": mu.reindex(prices.columns).values,
-        "volatility": asset_vol.reindex(prices.columns).values
-    }).replace([np.inf, -np.inf], np.nan).dropna()
-
-    asset_df["sharpe_proxy"] = (asset_df["expected_return"] - RISK_FREE_RATE) / asset_df["volatility"]
-    top_assets = asset_df.sort_values(
-        ["sharpe_proxy", "expected_return"],
-        ascending=[False, False]
-    ).head(10)
-
-    weight_table = []
-    for sym, w in sorted(weights.items(), key=lambda x: x[1], reverse=True):
-        weight_table.append({
-            "symbol": sym,
-            "label": labels.get(sym, sym),
-            "group": group_map.get(sym, "Unknown"),
-            "weight": float(w),
-            "prior_weight": float(prior_weight_series.get(sym, 0.0))
+def universe_metadata() -> dict:
+    u = load_universe()
+    families = sorted({g.get("family", "Other") for g in u.get("groups", [])})
+    groups_by_family = {}
+    for g in u.get("groups", []):
+        fam = g.get("family", "Other")
+        groups_by_family.setdefault(fam, [])
+        groups_by_family[fam].append({
+            "name": g.get("name", "Unknown"),
+            "color": g.get("color", "#64748b"),
+            "count": len(g.get("items", []))
         })
+    for fam in groups_by_family:
+        groups_by_family[fam] = sorted(groups_by_family[fam], key=lambda x: x["name"])
+    return {"families": families, "groups_by_family": groups_by_family, "groups": u.get("groups", [])}
 
-    corr = returns.corr().fillna(0.0)
 
-    return {
-        "labels": labels,
-        "strategy": strategy,
-        "prices": prices,
-        "returns": returns,
-        "weights": weights,
-        "weight_series": weight_series,
-        "cov_matrix": cov_matrix,
-        "correlation_matrix": corr,
-        "portfolio_returns": portfolio_returns,
-        "benchmark_returns": benchmark_returns,
-        "aligned": aligned,
-        "frontier": frontier,
-        "top_assets": top_assets,
-        "weight_table": weight_table,
-        "prior_weight_series": prior_weight_series,
-        "group_map": group_map,
-        "group_weights_prior": group_weight_breakdown(prior_weight_series, group_map),
-        "group_weights_optimized": group_weight_breakdown(weight_series, group_map),
-        "group_targets_used": group_targets_input,
-        "group_bounds_used": group_bounds_input,
-        "group_views_used": group_views_input,
-        "view_confidences_used": view_confidences_input,
-        "cov_returns": cov_returns,
+def _extract_close(downloaded: pd.DataFrame, symbols: List[str]) -> pd.DataFrame:
+    if downloaded.empty:
+        return pd.DataFrame()
 
-        "metrics": {
-            "expected_return": float(perf[0]),
-            "volatility": float(perf[1]),
-            "sharpe": float(perf[2]),
-            "beta_vs_sp500": beta,
-            "alpha_vs_sp500": alpha_ann,
-            "tracking_error_vs_sp500": tracking_error,
-            "information_ratio_vs_sp500": information_ratio,
-            "benchmark_return": benchmark_ann_return,
-            "benchmark_volatility": benchmark_ann_vol
-        }
-    }
-
-
-def series_to_records(series):
-    out = []
-    for idx, val in series.dropna().items():
-        out.append({
-            "date": pd.to_datetime(idx).strftime("%Y-%m-%d"),
-            "value": float(val)
-        })
-    return out
-
-
-def compute_rolling_sharpe(portfolio_returns, window=63):
-    rf_daily = RISK_FREE_RATE / TRADING_DAYS
-    excess = portfolio_returns - rf_daily
-    sharpe = (excess.rolling(window).mean() / excess.rolling(window).std()) * np.sqrt(TRADING_DAYS)
-    return sharpe.replace([np.inf, -np.inf], np.nan)
-
-
-def compute_drawdown(portfolio_returns):
-    cumulative = (1 + portfolio_returns).cumprod()
-    running_max = cumulative.cummax()
-    drawdown = cumulative / running_max - 1.0
-    return cumulative, drawdown
-
-
-def compute_rolling_beta(aligned_returns, window=63):
-    cov = aligned_returns["portfolio"].rolling(window).cov(aligned_returns["benchmark"])
-    var = aligned_returns["benchmark"].rolling(window).var()
-    beta = cov / var
-    return beta.replace([np.inf, -np.inf], np.nan)
-
-
-def compute_relative_performance(aligned_returns):
-    relative = (1 + aligned_returns["portfolio"]).cumprod() / (1 + aligned_returns["benchmark"]).cumprod() - 1.0
-    return relative.replace([np.inf, -np.inf], np.nan)
-
-
-def compute_rolling_information_ratio(aligned_returns, window=63):
-    active = aligned_returns["portfolio"] - aligned_returns["benchmark"]
-    rolling_mean = active.rolling(window).mean() * TRADING_DAYS
-    rolling_te = active.rolling(window).std() * np.sqrt(TRADING_DAYS)
-    ir = rolling_mean / rolling_te
-    return ir.replace([np.inf, -np.inf], np.nan)
-
-
-def compute_hmm_regimes(portfolio_returns, n_states=3):
-    clean = portfolio_returns.dropna()
-    if len(clean) < 80:
-        raise RuntimeError("Not enough observations for HMM regime detection")
-
-    X = clean.values.reshape(-1, 1)
-    model = GaussianHMM(
-        n_components=n_states,
-        covariance_type="diag",
-        n_iter=200,
-        random_state=42
-    )
-    model.fit(X)
-    hidden_states = model.predict(X)
-
-    state_df = pd.DataFrame({
-        "date": clean.index,
-        "return": clean.values,
-        "state": hidden_states
-    })
-
-    state_means = state_df.groupby("state")["return"].mean().sort_values()
-    rank_map = {}
-    ordered_states = state_means.index.tolist()
-
-    if len(ordered_states) == 3:
-        rank_map[ordered_states[0]] = "Bear"
-        rank_map[ordered_states[1]] = "Neutral"
-        rank_map[ordered_states[2]] = "Bull"
-    else:
-        for i, s in enumerate(ordered_states):
-            rank_map[s] = f"State {i+1}"
-
-    state_df["label"] = state_df["state"].map(rank_map)
-
-    return [
-        {
-            "date": pd.to_datetime(row["date"]).strftime("%Y-%m-%d"),
-            "state": int(row["state"]),
-            "label": row["label"],
-            "return": float(row["return"])
-        }
-        for _, row in state_df.iterrows()
-    ]
-
-
-def compute_risk_metrics(portfolio_returns, confidence=0.95, horizon=1):
-    clean = portfolio_returns.dropna()
-    if len(clean) < 50:
-        raise RuntimeError("Not enough observations for risk calculations")
-
-    alpha = 1 - confidence
-
-    hist_q = clean.quantile(alpha)
-    hist_var = -float(hist_q) * np.sqrt(horizon)
-    hist_tail = clean[clean <= hist_q]
-    hist_cvar = -float(hist_tail.mean()) * np.sqrt(horizon) if len(hist_tail) > 0 else None
-
-    mu = float(clean.mean()) * horizon
-    sigma = float(clean.std()) * np.sqrt(horizon)
-    z = norm.ppf(alpha)
-
-    param_var = -(mu + z * sigma)
-    param_cvar = -(mu - sigma * (norm.pdf(z) / alpha))
-
-    return {
-        "confidence": confidence,
-        "horizon_days": horizon,
-        "historical_var": hist_var,
-        "historical_cvar": hist_cvar,
-        "historical_es": hist_cvar,
-        "parametric_var": float(param_var),
-        "parametric_cvar": float(param_cvar),
-        "parametric_es": float(param_cvar)
-    }
-
-
-def compute_risk_contributions(weight_series, cov_matrix, labels):
-    cov_aligned = cov_matrix.loc[weight_series.index, weight_series.index]
-    w = weight_series.values.reshape(-1, 1)
-    sigma = cov_aligned.values
-
-    portfolio_var = float(w.T @ sigma @ w)
-    if portfolio_var <= 0:
-        return []
-
-    portfolio_vol = np.sqrt(portfolio_var)
-    marginal_contrib = (sigma @ w) / portfolio_vol
-    component_contrib = w * marginal_contrib
-    pct_contrib = component_contrib / portfolio_vol
-
-    rows = []
-    for i, sym in enumerate(weight_series.index):
-        rows.append({
-            "symbol": sym,
-            "label": labels.get(sym, sym),
-            "weight": float(w[i, 0]),
-            "marginal_risk_contribution": float(marginal_contrib[i, 0]),
-            "component_risk_contribution": float(component_contrib[i, 0]),
-            "percent_risk_contribution": float(pct_contrib[i, 0])
-        })
-
-    return sorted(rows, key=lambda x: x["percent_risk_contribution"], reverse=True)
-
-
-def compute_lightweight_forecast(symbol, period="3y", lookback=30, forecast_horizon=20):
-    df = yf.download(
-        tickers=symbol,
-        period=period,
-        interval="1d",
-        auto_adjust=True,
-        progress=False,
-        threads=False
-    )
-
-    if df.empty:
-        raise RuntimeError("No data returned for forecast")
-
-    if isinstance(df.columns, pd.MultiIndex):
-        close = df["Close"][symbol].dropna()
-    else:
-        close = df["Close"].dropna()
-
-    if len(close) < max(lookback + 20, 80):
-        raise RuntimeError("Not enough observations for forecast")
-
-    values = close.values.astype(float)
-    returns = pd.Series(values).pct_change().dropna().values
-
-    if len(returns) < lookback + 10:
-        raise RuntimeError("Not enough return observations for forecast")
-
-    X, y = [], []
-    for i in range(lookback, len(returns)):
-        X.append(returns[i - lookback:i])
-        y.append(returns[i])
-
-    X = np.array(X)
-    y = np.array(y)
-
-    model = LinearRegression()
-    model.fit(X, y)
-
-    rolling_window = returns[-lookback:].copy()
-    predicted_returns = []
-
-    for _ in range(forecast_horizon):
-        pred = float(model.predict(rolling_window.reshape(1, -1))[0])
-        pred = float(np.clip(pred, -0.08, 0.08))
-        predicted_returns.append(pred)
-        rolling_window = np.roll(rolling_window, -1)
-        rolling_window[-1] = pred
-
-    last_price = float(close.iloc[-1])
-    forecast_prices = []
-    current_price = last_price
-    for r in predicted_returns:
-        current_price = current_price * (1 + r)
-        forecast_prices.append(current_price)
-
-    last_date = pd.to_datetime(close.index[-1])
-    future_dates = pd.bdate_range(last_date + pd.Timedelta(days=1), periods=forecast_horizon)
-    history = close.tail(120)
-
-    return {
-        "symbol": symbol,
-        "model": "Lightweight autoregressive forecast",
-        "history": [
-            {"date": pd.to_datetime(idx).strftime("%Y-%m-%d"), "value": float(val)}
-            for idx, val in history.items()
-        ],
-        "forecast": [
-            {"date": dt.strftime("%Y-%m-%d"), "value": float(val)}
-            for dt, val in zip(future_dates, forecast_prices)
-        ]
-    }
-
-
-
-# ============================
-# Technical Analysis (single instrument)
-# - Uses deterministic Yahoo Finance data only
-# - Metrics are computed on daily returns; charts on price and derived series
-# ============================
-
-def _ema(series: pd.Series, span: int):
-    return series.ewm(span=span, adjust=False).mean()
-
-def _rsi(series: pd.Series, period: int = 14):
-    delta = series.diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
-    # Wilder smoothing via EMA with alpha=1/period
-    roll_up = up.ewm(alpha=1/period, adjust=False).mean()
-    roll_down = down.ewm(alpha=1/period, adjust=False).mean()
-    rs = roll_up / roll_down.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.replace([np.inf, -np.inf], np.nan)
-
-def _safe_float(x):
-    try:
-        if x is None:
-            return None
-        v = float(x)
-        if np.isfinite(v):
-            return v
-        return None
-    except Exception:
-        return None
-
-def _download_close(symbol: str, period: str = "2y", interval: str = "1d"):
-    df = yf.download(
-        tickers=symbol,
-        period=period,
-        interval=interval,
-        auto_adjust=True,
-        progress=False,
-        threads=False
-    )
-    if df is None or df.empty:
-        raise RuntimeError("No market data returned for the selected instrument")
-    if isinstance(df.columns, pd.MultiIndex):
-        try:
-            close = df["Close"][symbol].dropna()
-        except Exception:
-            close = df.xs(symbol, axis=1, level=0)["Close"].dropna()
-    else:
-        close = df["Close"].dropna()
-
-    if len(close) < 60:
-        raise RuntimeError("Not enough price history for technical analysis")
-    close = close.sort_index().ffill().dropna()
-    return close
-
-def _quant_metrics(returns: pd.Series):
-    # Returns are daily simple returns (not log returns)
-    if qs is None:
-        # Fallback: compute essentials without naming dependencies in messages
-        rf_daily = RISK_FREE_RATE / TRADING_DAYS
-        excess = returns - rf_daily
-        cagr = (1 + returns).prod() ** (TRADING_DAYS / len(returns)) - 1
-        vol = returns.std() * np.sqrt(TRADING_DAYS)
-        sharpe = (excess.mean() / excess.std()) * np.sqrt(TRADING_DAYS) if excess.std() and excess.std() == excess.std() else None
-        downside = returns[returns < 0]
-        sortino = (excess.mean() * TRADING_DAYS) / (downside.std() * np.sqrt(TRADING_DAYS)) if len(downside) > 5 and downside.std() else None
-        cum = (1 + returns).cumprod()
-        dd = cum / cum.cummax() - 1
-        mdd = dd.min()
-        calmar = (cagr / abs(mdd)) if mdd and mdd < 0 else None
-        return {
-            "cagr": _safe_float(cagr),
-            "volatility": _safe_float(vol),
-            "sharpe": _safe_float(sharpe),
-            "sortino": _safe_float(sortino),
-            "max_drawdown": _safe_float(mdd),
-            "calmar": _safe_float(calmar),
-            "skew": _safe_float(returns.skew()),
-            "kurtosis": _safe_float(returns.kurtosis()),
-            "win_rate": _safe_float((returns > 0).mean())
-        }
-
-    # Primary path: metrics engine
-    return {
-        "cagr": _safe_float(qs.stats.cagr(returns)),
-        "volatility": _safe_float(qs.stats.volatility(returns)),
-        "sharpe": _safe_float(qs.stats.sharpe(returns, rf=RISK_FREE_RATE)),
-        "sortino": _safe_float(qs.stats.sortino(returns, rf=RISK_FREE_RATE)),
-        "max_drawdown": _safe_float(qs.stats.max_drawdown(returns)),
-        "calmar": _safe_float(qs.stats.calmar(returns)),
-        "skew": _safe_float(qs.stats.skew(returns)),
-        "kurtosis": _safe_float(qs.stats.kurtosis(returns)),
-        "win_rate": _safe_float(qs.stats.win_rate(returns))
-    }
-
-def _monthly_heatmap(returns: pd.Series):
-    m = (1 + returns).resample("M").prod() - 1
-    if m.empty:
-        return {"years": [], "months": [], "z": []}
-    df = m.to_frame("ret")
-    df["year"] = df.index.year
-    df["month"] = df.index.month
-    pivot = df.pivot_table(index="year", columns="month", values="ret", aggfunc="mean").sort_index()
-    years = [int(y) for y in pivot.index.tolist()]
-    months = [int(c) for c in pivot.columns.tolist()]
-    z = pivot.fillna(0.0).values.tolist()
-    return {"years": years, "months": months, "z": z}
-
-def build_technical_analysis(symbol: str, period: str = "2y"):
-    close = _download_close(symbol, period=period, interval="1d")
-    returns = close.pct_change().dropna()
-
-    metrics = _quant_metrics(returns)
-
-    sma20 = close.rolling(20).mean()
-    sma50 = close.rolling(50).mean()
-    rsi14 = _rsi(close, 14)
-
-    macd = _ema(close, 12) - _ema(close, 26)
-    macd_signal = _ema(macd, 9)
-    macd_hist = macd - macd_signal
-
-    rolling_vol = returns.rolling(63).std() * np.sqrt(TRADING_DAYS)
-    cumulative, drawdown = compute_drawdown(returns)
-
-    heatmap = _monthly_heatmap(returns)
-
-    def _rec(s):
-        return [{"date": pd.to_datetime(i).strftime("%Y-%m-%d"), "value": float(v)} for i, v in s.dropna().items()]
-
-    payload = {
-        "symbol": symbol,
-        "latest_price": float(close.iloc[-1]),
-        "returns_count": int(len(returns)),
-        "metrics": metrics,
-        "price": _rec(close),
-        "sma20": _rec(sma20),
-        "sma50": _rec(sma50),
-        "rsi14": _rec(rsi14),
-        "macd": _rec(macd),
-        "macd_signal": _rec(macd_signal),
-        "macd_hist": _rec(macd_hist),
-        "drawdown": _rec(drawdown),
-        "rolling_vol": _rec(rolling_vol),
-        "monthly_heatmap": heatmap
-    }
-    return payload
-
-
-@app.post("/api/technical")
-def api_technical(payload: dict = Body(...)):
-    try:
-        symbol = payload.get("symbol")
-        period = payload.get("period", "2y")
-
-        if not symbol:
-            raise RuntimeError("Symbol is required for technical analysis")
-
-        # Keep allowed periods tight
-        allowed = {"6mo", "1y", "2y", "5y", "10y", "max"}
-        if isinstance(period, str) and period not in allowed:
-            period = "2y"
-
-        result = build_technical_analysis(symbol=symbol, period=period)
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-def _download_close_matrix(symbols, period="5y", interval="1d"):
-    if not symbols:
-        raise RuntimeError("No symbols supplied")
-    frames = {}
-    for sym in symbols:
-        try:
-            s = _download_close(sym, period=period, interval=interval)
-            frames[sym] = s.rename(sym)
-        except Exception:
-            continue
-    if not frames:
-        raise RuntimeError("No price histories could be downloaded for the selected symbols")
-    df = pd.concat(frames.values(), axis=1).sort_index().ffill().dropna(how="all")
-    return df
-
-
-def _series_records(s: pd.Series):
-    return [{"date": pd.to_datetime(i).strftime("%Y-%m-%d"), "value": float(v)} for i, v in s.dropna().items()]
-
-
-def _compare_symbol_block(symbol: str, period: str = "5y"):
-    close = _download_close(symbol, period=period, interval="1d")
-    returns = close.pct_change().dropna()
-    metrics = _quant_metrics(returns)
-    dd = compute_drawdown(returns)[1]
-    rv = returns.rolling(63).std() * np.sqrt(TRADING_DAYS)
-    return {
-        "symbol": symbol,
-        "latest_price": float(close.iloc[-1]),
-        "metrics": metrics,
-        "price": _series_records(close),
-        "cumulative": _series_records((1 + returns).cumprod()),
-        "drawdown": _series_records(dd),
-        "rolling_vol": _series_records(rv)
-    }
-
-
-def build_msci_em_turkey_analysis(period: str = "5y"):
-    universe = load_universe()
-    items = flatten_universe(universe)
-    universe_symbols = {x["symbol"] for x in items}
-
-    em_core = [s for s in EM_BENCHMARK_SYMBOLS if s in universe_symbols]
-    turkey_equity = [s for s in TURKEY_EQUITY_SYMBOLS if s in universe_symbols]
-    turkey_bond = [s for s in TURKEY_BOND_PROXY_SYMBOLS if s in universe_symbols]
-
-    em_country_symbols = [x["symbol"] for x in items if x["group"].startswith("Country ETF - EM") or x["group"].startswith("Country ETF - Turkey")]
-
-    focus = []
-    for s in em_core + turkey_equity + turkey_bond + em_country_symbols:
-        if s not in focus:
-            focus.append(s)
-
-    price_df = _download_close_matrix(focus, period=period, interval="1d")
-    ret_df = price_df.pct_change().dropna(how="all")
-
-    metrics_rows = []
-    labels = label_map()
-    groups = symbol_group_map()
-    for sym in ret_df.columns:
-        r = ret_df[sym].dropna()
-        if len(r) < 40:
-            continue
-        m = _quant_metrics(r)
-        metrics_rows.append({
-            "symbol": sym,
-            "label": labels.get(sym, sym),
-            "group": groups.get(sym, "Unknown"),
-            **m
-        })
-
-    metrics_rows = sorted(metrics_rows, key=lambda x: (x.get("sharpe") if x.get("sharpe") is not None else -999), reverse=True)
-
-    cum_df = (1 + ret_df).cumprod()
-    rolling_vol_df = ret_df.rolling(63).std() * np.sqrt(TRADING_DAYS)
-
-    def chart_records(symbols):
-        out = {}
+    if isinstance(downloaded.columns, pd.MultiIndex):
+        frames = []
         for sym in symbols:
-            if sym in cum_df.columns:
-                out[sym] = {
-                    "label": labels.get(sym, sym),
-                    "group": groups.get(sym, "Unknown"),
-                    "cumulative": _series_records(cum_df[sym]),
-                    "rolling_vol": _series_records(rolling_vol_df[sym]),
-                }
-        return out
+            if sym in downloaded.columns.get_level_values(0):
+                sub = downloaded[sym]
+                col = None
+                for candidate in ["Adj Close", "Close"]:
+                    if candidate in sub.columns:
+                        col = candidate
+                        break
+                if col is not None:
+                    s = sub[col].rename(sym)
+                    frames.append(s)
+        if not frames:
+            return pd.DataFrame()
+        prices = pd.concat(frames, axis=1)
+    else:
+        col = "Adj Close" if "Adj Close" in downloaded.columns else "Close"
+        if col not in downloaded.columns:
+            return pd.DataFrame()
+        name = symbols[0] if symbols else "Asset"
+        prices = downloaded[[col]].rename(columns={col: name})
 
-    turkey_equity_blocks = []
-    for sym in turkey_equity:
-        if sym in price_df.columns:
-            turkey_equity_blocks.append(_compare_symbol_block(sym, period=period))
-
-    turkey_bond_blocks = []
-    for sym in turkey_bond:
-        if sym in price_df.columns:
-            turkey_bond_blocks.append(_compare_symbol_block(sym, period=period))
-
-    return {
-        "period": period,
-        "em_core_symbols": em_core,
-        "turkey_equity_symbols": turkey_equity,
-        "turkey_bond_proxy_symbols": [b["symbol"] for b in turkey_bond_blocks],
-        "metrics_table": metrics_rows,
-        "em_core_charts": chart_records(em_core),
-        "country_em_charts": chart_records(em_country_symbols),
-        "turkey_equity": turkey_equity_blocks,
-        "turkey_bond_proxies": turkey_bond_blocks,
-        "notes": [
-            "Turkey equity sleeve uses TUR when available.",
-            "Turkey fixed-income sleeve is modeled with emerging-markets bond proxies because a dedicated U.S.-listed single-country Turkey sovereign bond ETF is not generally available in this universe."
-        ]
-    }
+    prices = prices.sort_index()
+    prices = prices[~prices.index.duplicated(keep="last")]
+    prices = prices.apply(pd.to_numeric, errors="coerce")
+    prices = prices.ffill()  # user specifically requested forward fill
+    prices = prices.dropna(axis=1, how="all")
+    if prices.empty:
+        return prices
+    prices = prices.dropna(axis=0, how="any")  # equal-length, common date/value index
+    prices = prices.loc[:, prices.nunique(dropna=True) > 1]
+    return prices
 
 
-@app.post("/api/msci-em-analysis")
-def api_msci_em_analysis(payload: dict = Body(...)):
+def fetch_prices(symbols: List[str], period: str = "2y", interval: str = "1d") -> pd.DataFrame:
+    symbols = [s for s in symbols if s]
+    if not symbols:
+        return pd.DataFrame()
     try:
-        period = payload.get("period", "5y")
-        if period not in {"1y", "2y", "5y", "10y", "max"}:
-            period = "5y"
-        result = build_msci_em_turkey_analysis(period=period)
-        return JSONResponse(content=result)
+        data = yf.download(
+            tickers=symbols,
+            period=period,
+            interval=interval,
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+            group_by="ticker",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail=f"Yahoo Finance download failed: {e}")
+
+    prices = _extract_close(data, symbols)
+    if prices.empty:
+        return prices
+
+    # keep only sufficiently long series after alignment
+    if len(prices) < 30:
+        return pd.DataFrame()
+    return prices
+
+
+def normalized_prices(prices: pd.DataFrame) -> pd.DataFrame:
+    return prices.div(prices.iloc[0]).mul(100.0)
+
+
+def compute_returns(prices: pd.DataFrame) -> pd.DataFrame:
+    returns = prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna(how="any")
+    return returns
+
+
+def annualized_metrics(returns: pd.Series) -> Dict[str, float]:
+    ann_return = float((1.0 + returns.mean()) ** TRADING_DAYS - 1.0)
+    ann_vol = float(returns.std(ddof=1) * math.sqrt(TRADING_DAYS))
+    sharpe = ann_return / ann_vol if ann_vol > 0 else 0.0
+    wealth = (1 + returns).cumprod()
+    dd = wealth / wealth.cummax() - 1
+    mdd = float(dd.min()) if not dd.empty else 0.0
+    return {"ann_return": ann_return, "ann_vol": ann_vol, "sharpe": sharpe, "max_drawdown": mdd}
+
+
+def make_portfolio(returns: pd.DataFrame, rows: List[dict], method: str = "current") -> Tuple[pd.Series, Dict[str, float]]:
+    symbols = list(returns.columns)
+    row_map = {r["symbol"]: r for r in rows}
+    if method == "equal":
+        w = np.repeat(1.0 / len(symbols), len(symbols))
+    elif method == "inverse_vol":
+        inv = 1.0 / returns.std(ddof=1).replace(0, np.nan)
+        inv = inv.fillna(0.0)
+        w = (inv / inv.sum()).to_numpy()
+    else:
+        raw = np.array([max(float(row_map[s]["target"]), 0.0) for s in symbols], dtype=float)
+        if raw.sum() <= 0:
+            w = np.repeat(1.0 / len(symbols), len(symbols))
+        else:
+            w = raw / raw.sum()
+    port = returns.mul(w, axis=1).sum(axis=1)
+    weights = {s: float(v) for s, v in zip(symbols, w)}
+    return port, weights
+
+
+def ensure_min_assets(rows: List[dict], min_assets: int = 2):
+    if len(rows) < min_assets:
+        raise HTTPException(status_code=400, detail=f"At least {min_assets} assets are required after filtering. Current selection has {len(rows)}.")
+
+
+def chart_records(df: pd.DataFrame) -> List[dict]:
+    if df.empty:
+        return []
+    recs = []
+    for dt, row in df.iterrows():
+        r = {"date": dt.strftime("%Y-%m-%d")}
+        for col, val in row.items():
+            r[col] = None if pd.isna(val) else float(val)
+        recs.append(r)
+    return recs
+
+
+def series_records(series: pd.Series, name: str) -> List[dict]:
+    if series.empty:
+        return []
+    return [{"date": idx.strftime("%Y-%m-%d"), name: float(val)} for idx, val in series.items()]
+
+
+def technical_indicators(prices: pd.Series) -> dict:
+    delta = prices.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    ema12 = prices.ewm(span=12, adjust=False).mean()
+    ema26 = prices.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    hist = macd - signal
+    sma20 = prices.rolling(20).mean()
+    sma50 = prices.rolling(50).mean()
+    sma200 = prices.rolling(200).mean()
+    rolling_vol = prices.pct_change().rolling(20).std() * math.sqrt(TRADING_DAYS)
+    latest = prices.iloc[-1]
+    out = {
+        "last_price": float(latest),
+        "rsi14": float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else None,
+        "macd": float(macd.iloc[-1]) if not pd.isna(macd.iloc[-1]) else None,
+        "macd_signal": float(signal.iloc[-1]) if not pd.isna(signal.iloc[-1]) else None,
+        "macd_hist": float(hist.iloc[-1]) if not pd.isna(hist.iloc[-1]) else None,
+        "sma20": float(sma20.iloc[-1]) if not pd.isna(sma20.iloc[-1]) else None,
+        "sma50": float(sma50.iloc[-1]) if not pd.isna(sma50.iloc[-1]) else None,
+        "sma200": float(sma200.iloc[-1]) if not pd.isna(sma200.iloc[-1]) else None,
+        "dist_sma20_pct": float((latest / sma20.iloc[-1] - 1) * 100) if not pd.isna(sma20.iloc[-1]) else None,
+        "dist_sma50_pct": float((latest / sma50.iloc[-1] - 1) * 100) if not pd.isna(sma50.iloc[-1]) else None,
+        "dist_sma200_pct": float((latest / sma200.iloc[-1] - 1) * 100) if not pd.isna(sma200.iloc[-1]) else None,
+        "vol20_ann": float(rolling_vol.iloc[-1]) if not pd.isna(rolling_vol.iloc[-1]) else None,
+        "mom_1m_pct": float((prices.iloc[-1] / prices.iloc[-22] - 1) * 100) if len(prices) >= 22 else None,
+        "mom_3m_pct": float((prices.iloc[-1] / prices.iloc[-66] - 1) * 100) if len(prices) >= 66 else None,
+        "mom_1y_pct": float((prices.iloc[-1] / prices.iloc[-252] - 1) * 100) if len(prices) >= 252 else None,
+    }
+    return out
+
+
+def get_dataset(family: str = "ALL", group: str = "ALL", period: str = "2y", include_reference: bool = False):
+    rows = get_rows(family=family, group=group, include_reference=include_reference)
+    ensure_min_assets(rows, 1)
+    symbols = [r["symbol"] for r in rows]
+    prices = fetch_prices(symbols, period=period)
+    if prices.empty:
+        raise HTTPException(status_code=400, detail="No valid aligned price data could be built after cleaning, forward fill, and equal-length intersection.")
+    # align rows to fetched prices only
+    rows = [r for r in rows if r["symbol"] in prices.columns]
+    if not rows:
+        raise HTTPException(status_code=400, detail="No selected assets survived price cleaning.")
+    returns = compute_returns(prices)
+    if returns.empty:
+        raise HTTPException(status_code=400, detail="No valid return series available after cleaning.")
+    return rows, prices, returns
+
 
 @app.get("/")
 def root():
@@ -1414,181 +265,265 @@ def healthz():
 
 @app.get("/api/universe")
 def api_universe():
-    return JSONResponse(content=load_universe())
+    return JSONResponse(content=universe_metadata())
 
 
 @app.get("/api/snapshot")
-def api_snapshot(force: bool = False):
-    current_time = time.time()
+def api_snapshot():
+    items = flatten_universe(load_universe())
+    rows = []
+    for x in items:
+        included = x["family"] != "World Indices"
+        rows.append({
+            "family": x["family"],
+            "group": x["group"],
+            "group_color": x["group_color"],
+            "symbol": x["symbol"],
+            "label": x["label"],
+            "current_weight": round(x["target"] * 100.0, 4),
+            "target": x["target"],
+            "included": included,
+            "status": "Included" if included else "Reference"
+        })
+    return JSONResponse(content={"rows": rows})
 
-    if (
-        not force
-        and CACHE["snapshot"] is not None
-        and (current_time - CACHE["timestamp"] < CACHE_TTL_SECONDS)
-    ):
-        return JSONResponse(content=CACHE["snapshot"])
 
-    try:
-        snapshot = build_snapshot()
-        CACHE["snapshot"] = snapshot
-        CACHE["timestamp"] = current_time
-        return JSONResponse(content=snapshot)
-    except Exception as e:
-        if CACHE["snapshot"] is not None:
-            stale = dict(CACHE["snapshot"])
-            stale["stale"] = True
-            stale["error"] = str(e)
-            return JSONResponse(content=stale)
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/overview")
+def api_overview(
+    family: str = Query("ALL"),
+    group: str = Query("ALL"),
+    period: str = Query("2y")
+):
+    rows, prices, returns = get_dataset(family=family, group=group, period=period)
+    ensure_min_assets(rows, 2 if len(rows) > 1 else 1)
+    port, weights = make_portfolio(returns, rows, method="current")
+    port_metrics = annualized_metrics(port)
+    norm = normalized_prices(prices)
+    norm["Portfolio"] = normalized_prices((1 + port).cumprod().to_frame("Portfolio"))["Portfolio"]
+    kpis = {
+        "assets": len(prices.columns),
+        "observations": int(len(prices)),
+        "start_date": prices.index.min().strftime("%Y-%m-%d"),
+        "end_date": prices.index.max().strftime("%Y-%m-%d"),
+        "ann_return_pct": round(port_metrics["ann_return"] * 100, 2),
+        "ann_vol_pct": round(port_metrics["ann_vol"] * 100, 2),
+        "sharpe": round(port_metrics["sharpe"], 3),
+        "max_drawdown_pct": round(port_metrics["max_drawdown"] * 100, 2),
+    }
+    return JSONResponse(content={
+        "kpis": kpis,
+        "weights": weights,
+        "normalized_chart": chart_records(norm),
+        "aligned_symbols": list(prices.columns),
+    })
 
+
+@app.get("/api/technical")
+def api_technical(
+    family: str = Query("ALL"),
+    group: str = Query("ALL"),
+    period: str = Query("2y")
+):
+    rows, prices, _ = get_dataset(family=family, group=group, period=period)
+    out = []
+    row_map = {r["symbol"]: r for r in rows}
+    for sym in prices.columns:
+        info = technical_indicators(prices[sym])
+        out.append({
+            "family": row_map[sym]["family"],
+            "group": row_map[sym]["group"],
+            "symbol": sym,
+            "label": row_map[sym]["label"],
+            **info
+        })
+    return JSONResponse(content={"rows": out})
+
+
+@app.get("/api/analytics")
+def api_analytics(
+    family: str = Query("ALL"),
+    group: str = Query("ALL"),
+    period: str = Query("2y")
+):
+    rows, prices, returns = get_dataset(family=family, group=group, period=period)
+    port, weights = make_portfolio(returns, rows, method="current")
+    corr = returns.corr().round(4).fillna(0)
+    metrics = []
+    row_map = {r["symbol"]: r for r in rows}
+    for sym in returns.columns:
+        m = annualized_metrics(returns[sym])
+        metrics.append({
+            "family": row_map[sym]["family"],
+            "group": row_map[sym]["group"],
+            "symbol": sym,
+            "label": row_map[sym]["label"],
+            "ann_return_pct": round(m["ann_return"] * 100, 2),
+            "ann_vol_pct": round(m["ann_vol"] * 100, 2),
+            "sharpe": round(m["sharpe"], 3),
+            "max_drawdown_pct": round(m["max_drawdown"] * 100, 2)
+        })
+    port_norm = normalized_prices((1 + port).cumprod().to_frame("Portfolio"))
+    return JSONResponse(content={
+        "metrics": metrics,
+        "correlation_columns": list(corr.columns),
+        "correlation_matrix": corr.values.tolist(),
+        "portfolio_chart": chart_records(port_norm),
+        "weights": weights,
+    })
+
+
+@app.get("/api/risk-dashboard")
+def api_risk_dashboard(
+    family: str = Query("ALL"),
+    group: str = Query("ALL"),
+    period: str = Query("2y")
+):
+    rows, prices, returns = get_dataset(family=family, group=group, period=period)
+    ensure_min_assets(rows, 2)
+    port, weights = make_portfolio(returns, rows, method="current")
+    cov = returns.cov() * TRADING_DAYS
+    w = np.array([weights[s] for s in returns.columns], dtype=float)
+    port_vol = float(np.sqrt(w @ cov.values @ w))
+    mrc = cov.values @ w / port_vol if port_vol > 0 else np.zeros_like(w)
+    rc = w * mrc
+    rc_pct = rc / rc.sum() if rc.sum() > 0 else np.zeros_like(rc)
+    hist_var_95 = float(np.quantile(port, 0.05))
+    hist_cvar_95 = float(port[port <= hist_var_95].mean()) if (port <= hist_var_95).any() else hist_var_95
+    drawdown = (1 + port).cumprod() / (1 + port).cumprod().cummax() - 1
+    contribution_rows = []
+    row_map = {r["symbol"]: r for r in rows}
+    for i, sym in enumerate(returns.columns):
+        contribution_rows.append({
+            "family": row_map[sym]["family"],
+            "group": row_map[sym]["group"],
+            "symbol": sym,
+            "label": row_map[sym]["label"],
+            "weight_pct": round(weights[sym] * 100, 2),
+            "risk_contribution_pct": round(float(rc_pct[i]) * 100, 2),
+        })
+    return JSONResponse(content={
+        "summary": {
+            "portfolio_vol_pct": round(port_vol * 100, 2),
+            "hist_var_95_pct": round(hist_var_95 * 100, 2),
+            "hist_cvar_95_pct": round(hist_cvar_95 * 100, 2),
+            "max_drawdown_pct": round(float(drawdown.min()) * 100, 2),
+        },
+        "risk_contributions": contribution_rows,
+        "drawdown_chart": series_records(drawdown, "Drawdown"),
+    })
+
+
+@app.get("/api/forecast")
+def api_forecast(
+    family: str = Query("ALL"),
+    group: str = Query("ALL"),
+    period: str = Query("2y"),
+    horizon: int = Query(20)
+):
+    rows, prices, returns = get_dataset(family=family, group=group, period=period)
+    port, weights = make_portfolio(returns, rows, method="current")
+    port_index = normalized_prices((1 + port).cumprod().to_frame("Portfolio"))["Portfolio"]
+    y = port_index.to_numpy(dtype=float)
+    x = np.arange(len(y), dtype=float)
+    coeff = np.polyfit(x, y, deg=1)
+    x_future = np.arange(len(y), len(y) + horizon, dtype=float)
+    y_future = coeff[0] * x_future + coeff[1]
+    future_dates = pd.bdate_range(port_index.index[-1] + pd.Timedelta(days=1), periods=horizon)
+    forecast = [{"date": d.strftime("%Y-%m-%d"), "Forecast": float(v)} for d, v in zip(future_dates, y_future)]
+    history = [{"date": d.strftime("%Y-%m-%d"), "Portfolio": float(v)} for d, v in port_index.items()]
+    return JSONResponse(content={"history": history, "forecast": forecast})
+
+
+@app.get("/api/construct")
+def api_construct(
+    family: str = Query("ALL"),
+    group: str = Query("ALL"),
+    method: str = Query("current"),
+    period: str = Query("2y")
+):
+    rows, prices, returns = get_dataset(family=family, group=group, period=period)
+    ensure_min_assets(rows, 2)
+    port, weights = make_portfolio(returns, rows, method=method)
+    out = []
+    row_map = {r["symbol"]: r for r in rows}
+    for sym in returns.columns:
+        out.append({
+            "family": row_map[sym]["family"],
+            "group": row_map[sym]["group"],
+            "symbol": sym,
+            "label": row_map[sym]["label"],
+            "weight_pct": round(weights[sym] * 100, 2),
+        })
+    return JSONResponse(content={
+        "message": "Construction universe validated successfully.",
+        "method": method,
+        "used_symbols": list(returns.columns),
+        "weights": out,
+    })
+
+
+@app.get("/api/futures-dashboard")
+def api_futures_dashboard(period: str = Query("1y")):
+    rows, prices, returns = get_dataset(family="Futures", group="ALL", period=period)
+    norm = normalized_prices(prices)
+    metrics = []
+    row_map = {r["symbol"]: r for r in rows}
+    for sym in returns.columns:
+        m = annualized_metrics(returns[sym])
+        metrics.append({
+            "group": row_map[sym]["group"],
+            "symbol": sym,
+            "label": row_map[sym]["label"],
+            "ann_return_pct": round(m["ann_return"] * 100, 2),
+            "ann_vol_pct": round(m["ann_vol"] * 100, 2),
+            "sharpe": round(m["sharpe"], 3),
+        })
+    return JSONResponse(content={"chart": chart_records(norm), "metrics": metrics})
 
 
 @app.get("/api/major-world-indices")
-def api_major_world_indices():
-    try:
-        return JSONResponse(content=build_market_snapshot(MAJOR_WORLD_INDICES, period="2y"))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def api_major_world_indices(period: str = Query("1y")):
+    rows, prices, returns = get_dataset(family="World Indices", group="ALL", period=period, include_reference=True)
+    norm = normalized_prices(prices)
+    metrics = []
+    row_map = {r["symbol"]: r for r in rows}
+    for sym in returns.columns:
+        m = annualized_metrics(returns[sym])
+        metrics.append({
+            "symbol": sym,
+            "label": row_map[sym]["label"],
+            "group": row_map[sym]["group"],
+            "ann_return_pct": round(m["ann_return"] * 100, 2),
+            "ann_vol_pct": round(m["ann_vol"] * 100, 2),
+            "sharpe": round(m["sharpe"], 3),
+        })
+    return JSONResponse(content={"chart": chart_records(norm), "metrics": metrics})
 
 
-@app.post("/api/optimization")
-def api_optimization(payload: dict = Body(...)):
-    try:
-        ctx = build_portfolio_context(payload)
-        top_assets = ctx["top_assets"]
-
-        donut = [
-            {
-                "symbol": row["symbol"],
-                "label": row["label"],
-                "weight": row["weight"]
-            }
-            for row in ctx["weight_table"]
-        ]
-
-        result = {
-            "strategy": ctx["strategy"],
-            "benchmark_symbol": BENCHMARK_SYMBOL,
-            "risk_free_rate": RISK_FREE_RATE,
-            "used_symbols": list(ctx["prices"].columns),
-            "metrics": ctx["metrics"],
-            "weights": ctx["weight_table"],
-            "group_weights_prior": ctx.get("group_weights_prior", []),
-            "group_weights_optimized": ctx.get("group_weights_optimized", []),
-
-            "allocation_donut": donut,
-            "frontier": ctx["frontier"],
-            "top_assets": [
-                {
-                    "symbol": row["symbol"],
-                    "label": row["label"],
-                    "expected_return": float(row["expected_return"]),
-                    "volatility": float(row["volatility"]),
-                    "sharpe_proxy": float(row["sharpe_proxy"])
-                }
-                for _, row in top_assets.iterrows()
-            ]
-        }
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/analytics")
-def api_analytics(payload: dict = Body(...)):
-    try:
-        ctx = build_portfolio_context(payload)
-
-        rolling_sharpe = compute_rolling_sharpe(ctx["portfolio_returns"], window=63)
-        cumulative, drawdown = compute_drawdown(ctx["portfolio_returns"])
-        rolling_beta = compute_rolling_beta(ctx["aligned"], window=63)
-        regimes = compute_hmm_regimes(ctx["portfolio_returns"], n_states=3)
-
-        benchmark_cumulative = (1 + ctx["aligned"]["benchmark"]).cumprod()
-        portfolio_cumulative = (1 + ctx["aligned"]["portfolio"]).cumprod()
-        relative_performance = compute_relative_performance(ctx["aligned"])
-        rolling_ir = compute_rolling_information_ratio(ctx["aligned"], window=63)
-
-        result = {
-            "strategy": ctx["strategy"],
-            "benchmark_symbol": BENCHMARK_SYMBOL,
-            "benchmark_summary": ctx["metrics"],
-            "rolling_sharpe": series_to_records(rolling_sharpe),
-            "cumulative": series_to_records(cumulative),
-            "drawdown": series_to_records(drawdown),
-            "rolling_beta": series_to_records(rolling_beta),
-            "regimes": regimes,
-            "portfolio_cumulative": series_to_records(portfolio_cumulative),
-            "benchmark_cumulative": series_to_records(benchmark_cumulative),
-            "relative_performance": series_to_records(relative_performance),
-            "rolling_information_ratio": series_to_records(rolling_ir)
-        }
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/risk")
-def api_risk(payload: dict = Body(...)):
-    try:
-        confidence = float(payload.get("confidence", 0.95))
-        horizon = int(payload.get("horizon_days", 1))
-
-        ctx = build_portfolio_context(payload)
-        risk_95 = compute_risk_metrics(ctx["portfolio_returns"], confidence=0.95, horizon=horizon)
-        risk_99 = compute_risk_metrics(ctx["portfolio_returns"], confidence=0.99, horizon=horizon)
-        risk_custom = compute_risk_metrics(ctx["portfolio_returns"], confidence=confidence, horizon=horizon)
-
-        aligned_returns, aligned_weights = align_weights_for_risk(ctx["returns"], ctx["weight_series"])
-
-        risk_contributions = compute_risk_contributions(
-            aligned_weights,
-            (aligned_returns.cov() * TRADING_DAYS),
-            ctx["labels"]
-        )
-
-        heatmap = {
-            "x": list(ctx["correlation_matrix"].columns),
-            "y": list(ctx["correlation_matrix"].index),
-            "z": ctx["correlation_matrix"].round(4).values.tolist()
-        }
-
-        result = {
-            "strategy": ctx["strategy"],
-            "benchmark_symbol": BENCHMARK_SYMBOL,
-            "custom": risk_custom,
-            "risk_95": risk_95,
-            "risk_99": risk_99,
-            "risk_contributions": risk_contributions,
-            "risk_contrib_group_breakdown": group_weight_breakdown(aligned_weights, ctx.get("group_map", {})),
-            "weights_used_for_risk": [{"symbol": s, "weight": float(w)} for s, w in aligned_weights.items()],
-            "correlation_heatmap": heatmap
-        }
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/lstm-forecast")
-@app.post("/api/forecast")
-def api_lstm_forecast(payload: dict = Body(...)):
-    try:
-        family_filter = payload.get("family_filter", "ALL")
-        group_filter = payload.get("group_filter", "ALL")
-        symbol = payload.get("symbol")
-
-        if not symbol:
-            candidates = symbols_for_group(group_filter, family_filter)
-            if not candidates:
-                raise RuntimeError("No symbols found for selected group")
-            symbol = candidates[0]
-
-        result = compute_lightweight_forecast(
-            symbol=symbol,
-            period=payload.get("period", "3y"),
-            lookback=int(payload.get("lookback", 30)),
-            forecast_horizon=int(payload.get("forecast_horizon", 20))
-        )
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/msci-em-analysis")
+def api_msci_em_analysis(period: str = Query("2y")):
+    core_rows = get_rows(family="ETF", group="MSCI Emerging Markets - Core", include_reference=False)
+    tur_rows = get_rows(family="ETF", group="Country ETF - Turkey Equity", include_reference=False)
+    bond_rows = get_rows(family="ETF", group="Credit & EM Bond ETF", include_reference=False)
+    rows = core_rows + tur_rows + bond_rows
+    symbols = [r["symbol"] for r in rows]
+    prices = fetch_prices(symbols, period=period)
+    if prices.empty:
+        raise HTTPException(status_code=400, detail="No valid aligned MSCI EM / Turkey dataset could be built.")
+    returns = compute_returns(prices)
+    norm = normalized_prices(prices)
+    metrics = []
+    row_map = {r["symbol"]: r for r in rows}
+    for sym in returns.columns:
+        m = annualized_metrics(returns[sym])
+        block = "Turkey Equity" if sym == "TUR" else ("EM Bonds" if row_map[sym]["group"] == "Credit & EM Bond ETF" else "MSCI EM Core")
+        metrics.append({
+            "block": block,
+            "symbol": sym,
+            "label": row_map[sym]["label"],
+            "ann_return_pct": round(m["ann_return"] * 100, 2),
+            "ann_vol_pct": round(m["ann_vol"] * 100, 2),
+            "sharpe": round(m["sharpe"], 3),
+            "max_drawdown_pct": round(m["max_drawdown"] * 100, 2),
+        })
+    return JSONResponse(content={"chart": chart_records(norm), "metrics": metrics})
