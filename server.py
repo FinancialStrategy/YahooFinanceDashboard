@@ -59,11 +59,37 @@ def load_universe():
         return json.load(f)
 
 
+def family_from_group_name(name: str) -> str:
+    if name.startswith("Futures"):
+        return "Futures"
+    if name.startswith("Major Crypto"):
+        return "Major Crypto"
+    if name.startswith("MSCI Emerging Markets"):
+        return "MSCI Emerging Markets"
+    if name.startswith("Major World Indices"):
+        return "Major World Indices"
+    if name.startswith("Equity ETF"):
+        return "Equity ETF"
+    if name.startswith("Country ETF"):
+        return "Country ETF"
+    if name.startswith("Fixed Income ETF") or name.startswith("Emerging Market Bond ETF") or name.startswith("Inflation / Floating / Cash ETF"):
+        return "Fixed Income ETF"
+    if name.startswith("Real Assets ETF"):
+        return "Real Assets ETF"
+    if name.startswith("Commodity ETF") or name.startswith("Precious Metals ETF"):
+        return "Commodity ETF"
+    if name.startswith("Alternative Strategy ETF"):
+        return "Alternative Strategy ETF"
+    return name.split(" - ")[0]
+
+
 def flatten_universe(universe_dict):
     rows = []
     for group in universe_dict["groups"]:
+        family = group.get("family") or family_from_group_name(group.get("name", "Unknown"))
         for item in group["items"]:
             rows.append({
+                "family": family,
                 "group": group["name"],
                 "group_color": group["color"],
                 "symbol": item["symbol"],
@@ -309,6 +335,7 @@ def build_snapshot():
             spark = close.tail(20).round(6).tolist()
 
             row = {
+                "family": item.get("family", family_from_group_name(item["group"])),
                 "group": item["group"],
                 "group_color": item["group_color"],
                 "symbol": item["symbol"],
@@ -1054,7 +1081,11 @@ def healthz():
 
 @app.get("/api/universe")
 def api_universe():
-    return JSONResponse(content=load_universe())
+    universe = load_universe()
+    for group in universe.get("groups", []):
+        if not group.get("family"):
+            group["family"] = family_from_group_name(group.get("name", "Unknown"))
+    return JSONResponse(content=universe)
 
 
 @app.get("/api/snapshot")
