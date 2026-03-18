@@ -44,12 +44,35 @@ if not INDEX_FILE.exists():
     if alt.exists():
         INDEX_FILE = alt
 UNIVERSE_FILE = BASE_DIR / "universe.json"
+if not UNIVERSE_FILE.exists():
+    alt_universe = BASE_DIR / "universe_institutional_etf.json"
+    if alt_universe.exists():
+        UNIVERSE_FILE = alt_universe
 
 app = FastAPI(title="Institutional Quant Platform")
 
 RISK_FREE_RATE = 0.035
 BENCHMARK_SYMBOL = "^GSPC"
 TRADING_DAYS = 252
+
+MAJOR_WORLD_INDICES = [
+    {"symbol": "^GSPC", "label": "S&P 500", "group": "North America"},
+    {"symbol": "^DJI", "label": "Dow Jones Industrial Average", "group": "North America"},
+    {"symbol": "^IXIC", "label": "NASDAQ Composite", "group": "North America"},
+    {"symbol": "^RUT", "label": "Russell 2000", "group": "North America"},
+    {"symbol": "^FTSE", "label": "FTSE 100", "group": "Europe"},
+    {"symbol": "^GDAXI", "label": "DAX", "group": "Europe"},
+    {"symbol": "^FCHI", "label": "CAC 40", "group": "Europe"},
+    {"symbol": "^STOXX50E", "label": "EURO STOXX 50", "group": "Europe"},
+    {"symbol": "^N225", "label": "Nikkei 225", "group": "Asia Pacific"},
+    {"symbol": "^HSI", "label": "Hang Seng Index", "group": "Asia Pacific"},
+    {"symbol": "000001.SS", "label": "Shanghai Composite", "group": "Asia Pacific"},
+    {"symbol": "^AXJO", "label": "S&P/ASX 200", "group": "Asia Pacific"},
+    {"symbol": "^BSESN", "label": "BSE SENSEX", "group": "Asia Pacific"},
+    {"symbol": "^BVSP", "label": "Ibovespa", "group": "Latin America"},
+    {"symbol": "^MXX", "label": "IPC Mexico", "group": "Latin America"},
+    {"symbol": "XU100.IS", "label": "BIST 100", "group": "Türkiye"}
+]
 EM_BENCHMARK_SYMBOLS = ["EEM", "IEMG", "VWO", "SPEM"]
 TURKEY_EQUITY_SYMBOLS = ["TUR"]
 TURKEY_BOND_PROXY_SYMBOLS = ["EMB", "EMLC", "EMHY", "EMBX", "LEMB"]
@@ -269,7 +292,7 @@ def download_price_matrix(symbols, period="2y", interval="1d"):
     close_df = close_df.dropna(axis=1, thresh=min_obs)
     close_df = close_df.sort_index().ffill().dropna()
 
-    if close_df.shape[1] < 3:
+    if close_df.shape[1] < 1:
         raise RuntimeError("Not enough valid symbols after cleaning")
 
     return close_df
@@ -345,6 +368,54 @@ def build_snapshot():
         "rows": result_rows
     }
 
+
+
+def build_market_snapshot(items, period="2y"):
+    symbols = [x["symbol"] for x in items]
+    df = yf.download(
+        tickers=symbols,
+        period=period,
+        interval="1d",
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+        group_by="ticker"
+    )
+    if df.empty:
+        raise RuntimeError("Yahoo Finance returned empty dataset for market snapshot")
+    result_rows = []
+    for item in items:
+        symbol = item["symbol"]
+        try:
+            sdf = extract_symbol_frame(df, symbol, len(symbols)).copy().dropna(how="all")
+            if sdf.empty or "Close" not in sdf.columns:
+                continue
+            close = sdf["Close"].dropna()
+            if len(close) < 2:
+                continue
+            last_price = float(close.iloc[-1])
+            prev_close = float(close.iloc[-2])
+            row = {
+                "group": item.get("group", "Market"),
+                "symbol": symbol,
+                "label": item.get("label", symbol),
+                "price": last_price,
+                "ret_1d_pct": ((last_price / prev_close) - 1.0) * 100.0 if prev_close != 0 else None,
+                "ret_1w_pct": safe_pct_return(close, 5),
+                "ret_1m_pct": safe_pct_return(close, 21),
+                "ret_3m_pct": safe_pct_return(close, 63),
+                "ytd_pct": ytd_return(close),
+                "ret_1y_pct": safe_pct_return(close, 252),
+                "vol_30d_pct": annualized_volatility(close, 30)
+            }
+            result_rows.append(row)
+        except Exception:
+            continue
+    return {
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "count": len(result_rows),
+        "rows": result_rows
+    }
 
 def clean_weight_dict(weights: dict):
     out = {}
@@ -1351,6 +1422,15 @@ def api_snapshot(force: bool = False):
             stale["stale"] = True
             stale["error"] = str(e)
             return JSONResponse(content=stale)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/api/major-world-indices")
+def api_major_world_indices():
+    try:
+        return JSONResponse(content=build_market_snapshot(MAJOR_WORLD_INDICES, period="2y"))
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
