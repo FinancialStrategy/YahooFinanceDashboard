@@ -395,7 +395,7 @@
       <div class="toolbar">
         <label for="group-filter">Asset Class:</label>
         <select id="group-filter">
-          <option value="ALL">All Groups</option>
+          <option value="ALL">All Assets</option>
         </select>
         <button id="refresh-btn">Refresh</button>
       </div>
@@ -607,21 +607,29 @@
         </div>
 
         <div class="small-note">
-          Construction outputs are computed for the instruments currently shown by the top Asset Class filter. For cross-asset allocation constraints, choose “All Groups”.
+          Construction outputs are computed for the instruments currently shown by the top Asset Class filter. For cross-asset allocation constraints, choose “All Assets”.
+        </div>
+
+        <div class="section-block" style="margin-top:12px;">
+          <div class="panel-box">
+            <div class="section-title">Construction Universe Check</div>
+            <div class="small-note">The optimizer automatically uses the instruments currently visible under the top Asset Class filter. No separate instrument selector is required.</div>
+            <div id="construction-selection-summary" class="small-note"></div>
+          </div>
         </div>
 
         <div class="two-col" style="margin-bottom:16px;">
           <div class="panel-box">
             <div class="section-title">Black-Litterman Asset-Class Views</div>
             <div class="small-note">
-              Her asset class için beklenen göreli görüşünü yıllık yüzde olarak gir. Pozitif değer overweight, negatif değer underweight etkisi yaratır.
+              Enter the expected annual relative view for each asset class. Positive values imply an overweight view, while negative values imply an underweight view.
             </div>
             <div id="bl-views-container"></div>
           </div>
           <div class="panel-box">
             <div class="section-title">Hard Constraint Engine</div>
             <div class="small-note">
-              Asset class bazlı min / max zorlayıcı sınırlar. Girilen değerler optimization aşamasında hard constraint olarak uygulanır.
+              Define binding asset-class minimum and maximum weights. These values are enforced as hard constraints during optimization.
             </div>
             <div id="group-bounds-container"></div>
           </div>
@@ -1188,6 +1196,7 @@
       updateWeightTotal();
       populateForecastSymbolSelector();
       renderClassTargetControls();
+      renderConstructionSelectionSummary();
     }
 
     async function loadUniverse() {
@@ -1609,6 +1618,68 @@
       return map[v] || v;
     }
 
+    function renderConstructionSelectionSummary() {
+      const rows = filteredRows();
+      const strategy = document.getElementById("opt-strategy")?.value || "max_sharpe";
+      const minRequired = strategy === "prior_only" ? 1 : 2;
+      const el = document.getElementById("construction-selection-summary");
+      if (!el) return;
+
+      if (!rows.length) {
+        el.innerHTML = '<span style="color:#b30000; font-weight:700;">No instruments are currently available under the selected Asset Class filter.</span>';
+        return;
+      }
+
+      const groups = [...new Set(rows.map(r => r.group || "Unknown"))];
+      const symbols = rows.map(r => `${r.symbol} (${r.label})`);
+      const preview = symbols.slice(0, 12).join(", ");
+      const extra = symbols.length > 12 ? ` ... +${symbols.length - 12} more` : "";
+      const color = rows.length >= minRequired ? '#0a7f2e' : '#8a6200';
+      const note = rows.length >= minRequired
+        ? `Ready for construction.`
+        : `The current filter leaves only ${rows.length} instrument(s). This is not enough for the selected strategy. Use All Assets or a broader Asset Class.`;
+
+      el.innerHTML = `
+        <div><strong>Selected Asset Class:</strong> ${escapeHtml(currentGroupFilter())}</div>
+        <div><strong>Visible instruments:</strong> ${rows.length}</div>
+        <div><strong>Asset classes represented:</strong> ${groups.length}</div>
+        <div><strong>Instrument set:</strong> ${escapeHtml(preview + extra)}</div>
+        <div style="margin-top:6px; color:${color}; font-weight:700;">${escapeHtml(note)}</div>
+      `;
+    }
+
+    function validateConstructionRequest() {
+      const rows = filteredRows();
+      const strategy = document.getElementById("opt-strategy")?.value || "max_sharpe";
+      const minRequired = strategy === "prior_only" ? 1 : 2;
+
+      if (!rows.length) {
+        return { ok: false, message: "No instruments are available under the selected Asset Class filter." };
+      }
+      if (rows.length < minRequired) {
+        return {
+          ok: false,
+          message: `The selected Asset Class currently has ${rows.length} instrument(s). ${strategy === "prior_only" ? "Prior-only mode requires at least 1 instrument." : "Portfolio construction requires at least 2 investable instruments after filtering."} Please switch to All Assets or choose a broader asset class.`
+        };
+      }
+
+      const positiveWeights = rows.filter(r => Number(r.current_weight || 0) > 0).length;
+      if (positiveWeights < minRequired) {
+        return {
+          ok: false,
+          message: `Only ${positiveWeights} instrument(s) have positive weights in the current universe. Assign positive weights to at least ${minRequired} instruments before running construction.`
+        };
+      }
+
+      const minW = parseFloat(document.getElementById("min-weight")?.value || "0");
+      const maxW = parseFloat(document.getElementById("max-weight")?.value || "100");
+      if (!(maxW > minW)) {
+        return { ok: false, message: "Max Weight (%) must be greater than Min Weight (%)." };
+      }
+
+      return { ok: true };
+    }
+
     function renderOptimizationMetrics(data) {
       const m = data.metrics || {};
       document.getElementById("opt-ret").textContent = fmtPctDecimal(m.expected_return);
@@ -1780,15 +1851,22 @@ function renderWeightsTable(data) {
 async function runOptimization() {
       const btn = document.getElementById("run-optimization-btn");
       const status = document.getElementById("construction-status");
+      const precheck = validateConstructionRequest();
+      if (!precheck.ok) {
+        status.textContent = `Construction check failed: ${precheck.message}`;
+        return;
+      }
+
       btn.disabled = true;
       btn.textContent = "Running...";
       status.textContent = `Portfolio construction is running for asset class: ${currentGroupFilter()}`;
 
       try {
+        const payload = basePayload();
         const res = await fetch("/api/optimization", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(basePayload())
+          body: JSON.stringify(payload)
         });
 
         const data = await res.json();
@@ -1800,10 +1878,11 @@ async function runOptimization() {
         renderWeightsBar(data);
         renderAllocationDonut(data);
         renderWeightsTable(data);
+        renderGroupWeights(data.group_prior_weights || [], data.group_optimized_weights || []);
 
-        const usedBounds = Object.keys(basePayload().group_bounds || {}).length;
-        const usedViews = Object.keys(basePayload().group_views || {}).length;
-        status.textContent = `Construction complete · Asset class: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length} · Bounds: ${usedBounds} · Views: ${usedViews}`;
+        const usedBounds = Object.keys(payload.group_bounds || {}).length;
+        const usedViews = Object.keys(payload.group_views || {}).length;
+        status.textContent = `Construction complete · Asset class: ${currentGroupFilter()} · Universe size: ${data.used_symbols.length} · Bounds used: ${usedBounds} · Views used: ${usedViews}`;
       } catch (err) {
         status.textContent = `Construction error: ${err.message}`;
       } finally {
@@ -2336,6 +2415,7 @@ async function runOptimization() {
       await loadSnapshot(true);
     });
 
+    document.getElementById("opt-strategy").addEventListener("change", renderConstructionSelectionSummary);
     document.getElementById("run-optimization-btn").addEventListener("click", runOptimization);
     document.getElementById("run-analytics-btn").addEventListener("click", runAnalytics);
     document.getElementById("run-risk-btn").addEventListener("click", runRisk);
