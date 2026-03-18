@@ -383,6 +383,7 @@
 
     <div class="tab-strip">
       <button class="tab-btn active" data-tab="overview-pane">Overview</button>
+      <button class="tab-btn" data-tab="major-world-indices-pane">Major World Indices</button>
       <button class="tab-btn" data-tab="technical-pane">Technical Analysis</button>
       <button class="tab-btn" data-tab="construction-pane">Portfolio Construction</button>
       <button class="tab-btn" data-tab="analytics-pane">Analytics</button>
@@ -401,6 +402,28 @@
       </div>
 
       <div id="overview-pane" class="tab-pane active">
+
+        <div class="section-block" style="margin-top:14px;">
+          <div class="section-title">Selected Instruments</div>
+          <div class="small-note">
+            This table shows the exact instruments that will be sent into the construction engine after the top Asset Class filter is applied.
+          </div>
+          <div class="table-shell" style="max-height:300px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset Class</th>
+                  <th>Symbol</th>
+                  <th>Instrument</th>
+                  <th class="right-text">Current Weight</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="selected-instruments-body"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="kpi-grid">
           <div class="kpi-box">
             <div class="kpi-label">Instruments Loaded</div>
@@ -461,6 +484,50 @@
       </div>
 
       
+
+      <div id="major-world-indices-pane" class="tab-pane">
+        <div class="toolbar">
+          <button id="run-major-world-indices-btn">Run Major World Indices</button>
+        </div>
+        <div class="small-note">
+          Dedicated dashboard for major developed and emerging equity benchmarks. This page separates Türkiye from the broader international index set.
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-box"><div class="kpi-label">Indices Loaded</div><div class="kpi-value" id="mwi-count">0</div></div>
+          <div class="kpi-box"><div class="kpi-label">Positive Today</div><div class="kpi-value" id="mwi-positive">0</div></div>
+          <div class="kpi-box"><div class="kpi-label">Average 30D Volatility</div><div class="kpi-value" id="mwi-vol">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Türkiye Included</div><div class="kpi-value" id="mwi-turkiye">No</div></div>
+        </div>
+        <div class="panel-box">
+          <div class="section-title">Major World Indices Overview</div>
+          <div id="major-world-indices-chart" class="medium-plot"></div>
+        </div>
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Indices Table</div>
+          <div class="table-shell" style="max-height:480px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Region</th>
+                  <th>Symbol</th>
+                  <th>Index</th>
+                  <th>Price</th>
+                  <th>1D</th>
+                  <th>1W</th>
+                  <th>1M</th>
+                  <th>3M</th>
+                  <th>YTD</th>
+                  <th>1Y</th>
+                  <th>Vol 30D</th>
+                </tr>
+              </thead>
+              <tbody id="major-world-indices-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="major-world-indices-status" class="status-line"></div>
+      </div>
+
       <div id="technical-pane" class="tab-pane">
         <div class="toolbar">
           <label for="ta-symbol">Instrument</label>
@@ -1196,7 +1263,95 @@
       updateWeightTotal();
       populateForecastSymbolSelector();
       renderClassTargetControls();
+      renderSelectedInstrumentsTable();
       renderConstructionSelectionSummary();
+    }
+
+
+    function renderSelectedInstrumentsTable() {
+      const tbody = document.getElementById("selected-instruments-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+      const rows = filteredRows();
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="5">No instruments available for the current asset class filter.</td>`;
+        tbody.appendChild(tr);
+        return;
+      }
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${r.group || "Unknown"}</td>
+          <td>${r.symbol}</td>
+          <td class="left-text">${r.label}</td>
+          <td class="right-text">${fmtNumber(r.current_weight, 2)}%</td>
+          <td>Included</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderMajorWorldIndices(data) {
+      const rows = data.rows || [];
+      const tbody = document.getElementById("major-world-indices-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${r.group || ""}</td>
+          <td>${r.symbol}</td>
+          <td class="left-text">${r.label}</td>
+          <td class="right-text">${fmtNumber(r.price, 2)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1d_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1w_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_3m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ytd_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1y_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.vol_30d_pct)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById("mwi-count").textContent = rows.length;
+      document.getElementById("mwi-positive").textContent = rows.filter(r => Number(r.ret_1d_pct) > 0).length;
+      const avgVol = rows.filter(r => r.vol_30d_pct !== null && r.vol_30d_pct !== undefined).reduce((a,r)=>a+Number(r.vol_30d_pct||0),0) / Math.max(rows.filter(r => r.vol_30d_pct !== null && r.vol_30d_pct !== undefined).length,1);
+      document.getElementById("mwi-vol").textContent = rows.length ? `${avgVol.toFixed(2)}%` : "—";
+      document.getElementById("mwi-turkiye").textContent = rows.some(r => String(r.symbol).toUpperCase() === "XU100.IS") ? "Yes" : "No";
+
+      Plotly.newPlot("major-world-indices-chart", [{
+        x: rows.map(r => r.label),
+        y: rows.map(r => Number(r.ytd_pct || 0)),
+        type: "bar",
+        marker: { color: "#7a0019" },
+        hovertemplate: "%{x}<br>YTD: %{y:.2f}%<extra></extra>"
+      }], {
+        margin: { l: 50, r: 20, t: 20, b: 120 },
+        xaxis: { tickangle: -45, gridcolor: "#d8d8d8" },
+        yaxis: { title: "YTD Return (%)", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    async function runMajorWorldIndices() {
+      const btn = document.getElementById("run-major-world-indices-btn");
+      const status = document.getElementById("major-world-indices-status");
+      if (btn) { btn.disabled = true; btn.textContent = "Running..."; }
+      if (status) status.textContent = "Major World Indices analysis is running...";
+      try {
+        const res = await fetch("/api/major-world-indices");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Major World Indices request failed");
+        renderMajorWorldIndices(data);
+        if (status) status.textContent = `Major World Indices complete · Loaded ${data.count || 0} benchmarks.`;
+      } catch (err) {
+        if (status) status.textContent = `Major World Indices error: ${err.message}`;
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Run Major World Indices"; }
+      }
     }
 
     async function loadUniverse() {
@@ -1259,6 +1414,7 @@
       document.getElementById("generated-at").textContent = new Date(data.generated_at).toLocaleString();
       buildRows(currentGroupFilter());
       populateTechnicalSymbolSelector();
+      renderSelectedInstrumentsTable();
       renderGroupViewsControls();
       renderGroupBoundsControls();
     }
@@ -2421,12 +2577,14 @@ async function runOptimization() {
     document.getElementById("run-risk-btn").addEventListener("click", runRisk);
     document.getElementById("run-forecast-btn").addEventListener("click", runForecast);
     document.getElementById("run-ta-btn").addEventListener("click", runTechnicalAnalysis);
+    const mwiBtn = document.getElementById("run-major-world-indices-btn"); if (mwiBtn) mwiBtn.addEventListener("click", runMajorWorldIndices);
 
     (async function init() {
       setupTabs();
       attachClassTargetButtons();
       await loadUniverse();
       await loadSnapshot(false);
+      await runMajorWorldIndices();
     })();
   </script>
 
