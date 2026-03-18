@@ -87,7 +87,7 @@ def _extract_close(downloaded: pd.DataFrame, symbols: List[str]) -> pd.DataFrame
                         col = candidate
                         break
                 if col is not None:
-                    s = sub[col].rename(sym)
+                    s = pd.to_numeric(sub[col], errors="coerce").rename(sym)
                     frames.append(s)
         if not frames:
             return pd.DataFrame()
@@ -98,23 +98,57 @@ def _extract_close(downloaded: pd.DataFrame, symbols: List[str]) -> pd.DataFrame
             return pd.DataFrame()
         name = symbols[0] if symbols else "Asset"
         prices = downloaded[[col]].rename(columns={col: name})
+        prices[name] = pd.to_numeric(prices[name], errors="coerce")
 
     prices = prices.sort_index()
     prices = prices[~prices.index.duplicated(keep="last")]
-    prices = prices.apply(pd.to_numeric, errors="coerce")
-    prices = prices.ffill()  # user specifically requested forward fill
-    prices = prices.dropna(axis=1, how="all")
-    if prices.empty:
-        return prices
-    prices = prices.dropna(axis=0, how="any")  # equal-length, common date/value index
-    prices = prices.loc[:, prices.nunique(dropna=True) > 1]
     return prices
 
 
-def fetch_prices(symbols: List[str], period: str = "2y", interval: str = "1d") -> pd.DataFrame:
+def clean_aligned_prices(prices: pd.DataFrame, min_coverage: float = 0.70, min_obs: int = 60) -> tuple[pd.DataFrame, dict]:
+    diag = {"input_columns": list(prices.columns), "dropped_columns": [], "coverage": {}, "start_dates": {}}
+    if prices.empty:
+        return prices, diag
+
+    prices = prices.apply(pd.to_numeric, errors="coerce")
+    prices = prices.ffill()
+
+    # column coverage check after forward fill
+    cov = (prices.notna().sum() / len(prices)).to_dict()
+    diag["coverage"] = {k: float(v) for k, v in cov.items()}
+    keep_cols = [c for c, v in cov.items() if v >= min_coverage]
+    diag["dropped_columns"] = [c for c in prices.columns if c not in keep_cols]
+    prices = prices[keep_cols]
+    if prices.empty:
+        return prices, diag
+
+    # equal-length alignment without over-killing the panel:
+    # start from the latest first-valid date across kept columns
+    first_valid = {}
+    for c in prices.columns:
+        idx = prices[c].first_valid_index()
+        first_valid[c] = None if idx is None else idx.strftime("%Y-%m-%d")
+    diag["start_dates"] = first_valid
+
+    valid_idxs = [prices[c].first_valid_index() for c in prices.columns if prices[c].first_valid_index() is not None]
+    if not valid_idxs:
+        return pd.DataFrame(), diag
+
+    common_start = max(valid_idxs)
+    prices = prices.loc[common_start:].copy()
+    prices = prices.ffill()
+    prices = prices.dropna(axis=0, how="any")
+    prices = prices.loc[:, prices.nunique(dropna=True) > 1]
+
+    if len(prices) < min_obs:
+        return pd.DataFrame(), diag
+    return prices, diag
+
+
+def fetch_prices(symbols: List[str], period: str = "2y", interval: str = "1d") -> tuple[pd.DataFrame, dict]:
     symbols = [s for s in symbols if s]
     if not symbols:
-        return pd.DataFrame()
+        return pd.DataFrame(), {"requested_symbols": [], "fetched_symbols": [], "dropped_symbols": [], "reason": "empty symbol list"}
     try:
         data = yf.download(
             tickers=symbols,
@@ -128,14 +162,22 @@ def fetch_prices(symbols: List[str], period: str = "2y", interval: str = "1d") -
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Yahoo Finance download failed: {e}")
 
-    prices = _extract_close(data, symbols)
-    if prices.empty:
-        return prices
+    raw = _extract_close(data, symbols)
+    if raw.empty:
+        return raw, {"requested_symbols": symbols, "fetched_symbols": [], "dropped_symbols": symbols, "reason": "no raw close prices"}
 
-    # keep only sufficiently long series after alignment
-    if len(prices) < 30:
-        return pd.DataFrame()
-    return prices
+    cleaned, diag = clean_aligned_prices(raw)
+    fetched = list(raw.columns)
+    dropped = [s for s in fetched if s not in cleaned.columns]
+    outdiag = {
+        "requested_symbols": symbols,
+        "fetched_symbols": fetched,
+        "retained_symbols": list(cleaned.columns),
+        "dropped_symbols": dropped,
+        "row_count": int(len(cleaned)),
+        **diag
+    }
+    return cleaned, outdiag
 
 
 def normalized_prices(prices: pd.DataFrame) -> pd.DataFrame:
@@ -240,18 +282,46 @@ def get_dataset(family: str = "ALL", group: str = "ALL", period: str = "2y", inc
     rows = get_rows(family=family, group=group, include_reference=include_reference)
     ensure_min_assets(rows, 1)
     symbols = [r["symbol"] for r in rows]
-    prices = fetch_prices(symbols, period=period)
+    prices, diag = fetch_prices(symbols, period=period)
     if prices.empty:
-        raise HTTPException(status_code=400, detail="No valid aligned price data could be built after cleaning, forward fill, and equal-length intersection.")
-    # align rows to fetched prices only
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "No valid aligned price data could be built after cleaning, forward fill, and equal-length alignment.",
+                "diagnostics": diag,
+                "family": family,
+                "group": group,
+                "period": period,
+            },
+        )
     rows = [r for r in rows if r["symbol"] in prices.columns]
     if not rows:
-        raise HTTPException(status_code=400, detail="No selected assets survived price cleaning.")
+        raise HTTPException(status_code=400, detail={"message": "No selected assets survived price cleaning.", "diagnostics": diag})
     returns = compute_returns(prices)
     if returns.empty:
-        raise HTTPException(status_code=400, detail="No valid return series available after cleaning.")
+        raise HTTPException(status_code=400, detail={"message": "No valid return series available after cleaning.", "diagnostics": diag})
     return rows, prices, returns
 
+
+@app.get("/api/data-diagnostics")
+def api_data_diagnostics(
+    family: str = Query("ALL"),
+    group: str = Query("ALL"),
+    period: str = Query("2y"),
+    include_reference: bool = Query(False)
+):
+    rows = get_rows(family=family, group=group, include_reference=include_reference)
+    symbols = [r["symbol"] for r in rows]
+    prices, diag = fetch_prices(symbols, period=period)
+    return JSONResponse(content={
+        "family": family,
+        "group": group,
+        "period": period,
+        "selected_count": len(rows),
+        "selected_symbols": symbols,
+        "diagnostics": diag,
+        "aligned_shape": [int(prices.shape[0]), int(prices.shape[1])] if not prices.empty else [0, 0]
+    })
 
 @app.get("/")
 def root():
