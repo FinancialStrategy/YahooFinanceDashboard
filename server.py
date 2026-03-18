@@ -27,6 +27,10 @@ from pypfopt import EfficientFrontier, expected_returns, risk_models
 from pypfopt import objective_functions
 from pypfopt.hierarchical_portfolio import HRPOpt
 from pypfopt.cla import CLA
+try:
+    from pypfopt import black_litterman
+except Exception:
+    black_litterman = None
 
 warnings.filterwarnings("ignore")
 
@@ -335,7 +339,6 @@ def build_snapshot():
     return {
         "generated_at": pd.Timestamp.utcnow().isoformat(),
         "count": len(result_rows),
-        "groups": sorted(list({r.get("group", "Unknown") for r in result_rows})),
         "rows": result_rows
     }
 
@@ -349,39 +352,178 @@ def clean_weight_dict(weights: dict):
     return dict(sorted(out.items(), key=lambda x: x[1], reverse=True))
 
 
-def build_frontier_points(mu, cov_matrix):
-    points = []
 
+def build_frontier_points(mu, cov_matrix, weight_bounds=(0, 1)):
+    points = []
     try:
-        ef_min = EfficientFrontier(mu, cov_matrix, weight_bounds=(0, 1))
+        ef_min = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
         ef_min.min_volatility()
-        min_ret, _, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        min_ret, min_vol, _ = ef_min.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
     except Exception:
         return points
 
-def optimize_with_strategy(prices, strategy, target_volatility, target_return, prior_weights=None, group_targets=None, min_weight=0.0, max_weight=1.0, group_map=None):
-    mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
-    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
-    rets = expected_returns.returns_from_prices(prices)
+    try:
+        ef_max = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
+        ef_max.max_sharpe(risk_free_rate=RISK_FREE_RATE)
+        max_ret, _, _ = ef_max.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+    except Exception:
+        max_ret = min_ret
 
-    # Prior weights (optional)
-    symbols = list(prices.columns)
-    if group_map is None:
-        group_map = symbol_group_map()
-    if prior_weights is not None:
-        prior_weights = normalize_weight_dict(prior_weights, symbols)
+    if max_ret < min_ret:
+        min_ret, max_ret = max_ret, min_ret
 
-    # Group targets (optional) - normalize to sum to 1
+    grid = np.linspace(float(min_ret), float(max_ret), 20)
+    for tr in grid:
+        try:
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=weight_bounds)
+            ef.efficient_return(float(tr))
+            ret, vol, shp = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+            points.append({
+                "expected_return": float(ret),
+                "volatility": float(vol),
+                "sharpe": float(shp)
+            })
+        except Exception:
+            continue
+
+    if not points:
+        try:
+            points.append({
+                "expected_return": float(min_ret),
+                "volatility": float(min_vol),
+                "sharpe": float((min_ret - RISK_FREE_RATE) / min_vol) if min_vol > 0 else 0.0
+            })
+        except Exception:
+            pass
+    return points
+
+
+def _normalize_group_targets(group_targets):
     if isinstance(group_targets, dict) and len(group_targets) > 0:
         gt = {str(k): float(v) for k, v in group_targets.items()}
         mx = max(gt.values()) if gt else 0.0
         if mx > 1.5:
-            gt = {k: v/100.0 for k, v in gt.items()}
+            gt = {k: v / 100.0 for k, v in gt.items()}
         tot = sum(max(v, 0.0) for v in gt.values())
         if tot > 0:
-            group_targets = {k: max(v, 0.0)/tot for k, v in gt.items()}
-        else:
-            group_targets = None
+            return {k: max(v, 0.0) / tot for k, v in gt.items()}
+    return None
+
+
+def _normalize_group_bounds(group_bounds):
+    out = {}
+    if not isinstance(group_bounds, dict):
+        return out
+    for g, cfg in group_bounds.items():
+        if not isinstance(cfg, dict):
+            continue
+        mn = float(cfg.get("min", 0.0) or 0.0)
+        mx = float(cfg.get("max", 1.0) or 1.0)
+        if mx > 1.5:
+            mx /= 100.0
+        if mn > 1.5:
+            mn /= 100.0
+        mn = max(0.0, mn)
+        mx = min(1.0, mx)
+        if mn <= mx:
+            out[str(g)] = {"min": mn, "max": mx}
+    return out
+
+
+def _group_to_symbol_view(group_views, group_map, symbols):
+    if not isinstance(group_views, dict):
+        return {}
+    symbol_views = {}
+    for g, view in group_views.items():
+        try:
+            val = float(view)
+        except Exception:
+            continue
+        members = [s for s in symbols if group_map.get(s, "Unknown") == g]
+        if not members:
+            continue
+        per_symbol = val / len(members)
+        for s in members:
+            symbol_views[s] = symbol_views.get(s, 0.0) + per_symbol
+    return symbol_views
+
+
+def _apply_group_constraints(ef, symbols, group_map, group_targets=None, group_bounds=None):
+    if cp is None:
+        return ef
+    if group_targets:
+        for g, tgt in group_targets.items():
+            idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+            if idxs:
+                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
+    for g, bounds in (group_bounds or {}).items():
+        idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
+        if not idxs:
+            continue
+        mn = float(bounds.get("min", 0.0))
+        mx = float(bounds.get("max", 1.0))
+        ef.add_constraint(lambda w, idxs=idxs, mn=mn: cp.sum(w[idxs]) >= mn)
+        ef.add_constraint(lambda w, idxs=idxs, mx=mx: cp.sum(w[idxs]) <= mx)
+    return ef
+
+
+def _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=None, view_confidences=None):
+    base_mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
+    if black_litterman is None or not group_views:
+        return base_mu
+
+    abs_views = _group_to_symbol_view(group_views, group_map, symbols)
+    if not abs_views:
+        return base_mu
+
+    try:
+        market_prior = black_litterman.market_implied_prior_returns(
+            market_caps={s: 1.0 for s in symbols},
+            risk_aversion=2.5,
+            cov_matrix=cov_matrix
+        )
+    except Exception:
+        market_prior = base_mu
+
+    conf_list = []
+    for s in abs_views.keys():
+        g = group_map.get(s, "Unknown")
+        c = None if not isinstance(view_confidences, dict) else view_confidences.get(g)
+        try:
+            c = float(c)
+        except Exception:
+            c = 0.5
+        if c > 1:
+            c = c / 100.0
+        conf_list.append(min(max(c, 0.05), 0.99))
+
+    try:
+        bl = black_litterman.BlackLittermanModel(
+            cov_matrix,
+            pi=market_prior,
+            absolute_views=abs_views,
+            view_confidences=np.array(conf_list, dtype=float)
+        )
+        posterior = bl.bl_returns()
+        return posterior.reindex(base_mu.index).fillna(base_mu)
+    except Exception:
+        return base_mu
+
+def optimize_with_strategy(prices, strategy, target_volatility, target_return, prior_weights=None, group_targets=None, min_weight=0.0, max_weight=1.0, group_map=None, group_bounds=None, group_views=None, view_confidences=None):
+    cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
+    symbols = list(prices.columns)
+    if group_map is None:
+        group_map = symbol_group_map()
+    mu = _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=group_views, view_confidences=view_confidences) if strategy.startswith("black_litterman") else expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
+    rets = expected_returns.returns_from_prices(prices)
+
+    # Prior weights (optional)
+    if prior_weights is not None:
+        prior_weights = normalize_weight_dict(prior_weights, symbols)
+
+    # Group targets / bounds (optional)
+    group_targets = _normalize_group_targets(group_targets)
+    group_bounds = _normalize_group_bounds(group_bounds)
 
     # A special mode: use prior weights as the portfolio (no optimization)
     if strategy == "prior_only":
@@ -400,13 +542,7 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     if strategy == "max_sharpe":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        if group_targets and cp is not None:
-            # enforce asset-class allocations as hard constraints
-            for g, tgt in group_targets.items():
-                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-                if len(idxs) == 0:
-                    continue
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
+        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
         ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -414,13 +550,7 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "min_volatility":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        if group_targets and cp is not None:
-            # enforce asset-class allocations as hard constraints
-            for g, tgt in group_targets.items():
-                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-                if len(idxs) == 0:
-                    continue
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
+        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
         ef.min_volatility()
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -428,13 +558,7 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "max_quadratic_utility":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        if group_targets and cp is not None:
-            # enforce asset-class allocations as hard constraints
-            for g, tgt in group_targets.items():
-                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-                if len(idxs) == 0:
-                    continue
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
+        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
         ef.max_quadratic_utility(risk_aversion=1.0)
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -442,13 +566,7 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "efficient_risk":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        if group_targets and cp is not None:
-            # enforce asset-class allocations as hard constraints
-            for g, tgt in group_targets.items():
-                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-                if len(idxs) == 0:
-                    continue
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
+        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
         ef.efficient_risk(target_volatility=float(target_volatility))
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
@@ -456,14 +574,22 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     elif strategy == "efficient_return":
         ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
 
-        if group_targets and cp is not None:
-            # enforce asset-class allocations as hard constraints
-            for g, tgt in group_targets.items():
-                idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-                if len(idxs) == 0:
-                    continue
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
+        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
         ef.efficient_return(target_return=float(target_return))
+        weights = ef.clean_weights()
+        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "black_litterman_max_sharpe":
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
+        ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
+        weights = ef.clean_weights()
+        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+
+    elif strategy == "black_litterman_min_volatility":
+        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
+        ef.min_volatility()
         weights = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
@@ -516,6 +642,9 @@ def build_portfolio_context(payload):
     # Prior weights (from UI) and asset-class targets (optional)
     prior_weights_input = payload.get("user_weights") or payload.get("prior_weights") or {}
     group_targets_input = payload.get("group_targets") or {}
+    group_bounds_input = payload.get("group_bounds") or {}
+    group_views_input = payload.get("group_views") or {}
+    view_confidences_input = payload.get("view_confidences") or {}
     min_weight = float(payload.get("min_weight", 0.0))
     max_weight = float(payload.get("max_weight", 1.0))
     if max_weight <= 0 or max_weight > 1:
@@ -556,7 +685,10 @@ def build_portfolio_context(payload):
         group_targets=group_targets_input,
         min_weight=min_weight,
         max_weight=max_weight,
-        group_map=group_map
+        group_map=group_map,
+        group_bounds=group_bounds_input,
+        group_views=group_views_input,
+        view_confidences=view_confidences_input
     )
 
     returns = prices.pct_change().dropna()
@@ -635,6 +767,10 @@ def build_portfolio_context(payload):
         "group_map": group_map,
         "group_weights_prior": group_weight_breakdown(prior_weight_series, group_map),
         "group_weights_optimized": group_weight_breakdown(weight_series, group_map),
+        "group_targets_used": group_targets_input,
+        "group_bounds_used": group_bounds_input,
+        "group_views_used": group_views_input,
+        "view_confidences_used": view_confidences_input,
         "cov_returns": cov_returns,
 
         "metrics": {
@@ -1055,13 +1191,7 @@ def healthz():
 
 @app.get("/api/universe")
 def api_universe():
-    universe = load_universe()
-    groups = universe.get("groups", []) if isinstance(universe, dict) else []
-    return JSONResponse(content={
-        "groups": groups,
-        "group_names": [g.get("name", "Unknown") for g in groups],
-        "count": len(groups)
-    })
+    return JSONResponse(content=load_universe())
 
 
 @app.get("/api/snapshot")
@@ -1150,6 +1280,7 @@ def api_analytics(payload: dict = Body(...)):
         result = {
             "strategy": ctx["strategy"],
             "benchmark_symbol": BENCHMARK_SYMBOL,
+            "benchmark_summary": ctx["metrics"],
             "rolling_sharpe": series_to_records(rolling_sharpe),
             "cumulative": series_to_records(cumulative),
             "drawdown": series_to_records(drawdown),
