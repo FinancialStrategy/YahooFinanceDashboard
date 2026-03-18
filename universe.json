@@ -1,289 +1,278 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "2.2",
   "base_currency": "USD",
   "target_sum_expected": 1.0,
-  "notes": "Institutional ETF universe grouped by asset class and sub-class. Server-compatible schema: groups -> name/color/items[symbol,label,target].",
+  "notes": "Institutional multi-asset universe with major crypto, country ETFs, MSCI Emerging Markets sleeves, Turkey equity and EM bond proxy sleeves. Server-compatible schema: groups -> name/color/items[symbol,label,target].",
   "groups": [
     {
-      "name": "Equity ETF - US Large Cap Blend",
+      "name": "Crypto - Major",
+      "color": "#f59e0b",
+      "items": [
+        {
+          "symbol": "BTC-USD",
+          "label": "Bitcoin",
+          "target": 0.040936
+        },
+        {
+          "symbol": "ETH-USD",
+          "label": "Ethereum",
+          "target": 0.02924
+        },
+        {
+          "symbol": "SOL-USD",
+          "label": "Solana",
+          "target": 0.011696
+        },
+        {
+          "symbol": "XRP-USD",
+          "label": "XRP",
+          "target": 0.009357
+        },
+        {
+          "symbol": "BNB-USD",
+          "label": "BNB",
+          "target": 0.008187
+        },
+        {
+          "symbol": "ADA-USD",
+          "label": "Cardano",
+          "target": 0.005848
+        },
+        {
+          "symbol": "DOGE-USD",
+          "label": "Dogecoin",
+          "target": 0.005848
+        },
+        {
+          "symbol": "AVAX-USD",
+          "label": "Avalanche",
+          "target": 0.003509
+        },
+        {
+          "symbol": "TRX-USD",
+          "label": "TRON",
+          "target": 0.002339
+        }
+      ]
+    },
+    {
+      "name": "Equity ETF - US Core",
       "color": "#2563eb",
       "items": [
         {
           "symbol": "SPY",
           "label": "SPDR S&P 500 ETF Trust",
-          "target": 0.0636
+          "target": 0.070175
         },
         {
           "symbol": "IVV",
           "label": "iShares Core S&P 500 ETF",
-          "target": 0.0455
+          "target": 0.046784
         },
-        {
-          "symbol": "VOO",
-          "label": "Vanguard S&P 500 ETF",
-          "target": 0.0455
-        }
-      ]
-    },
-    {
-      "name": "Equity ETF - US Large Cap Growth",
-      "color": "#1d4ed8",
-      "items": [
         {
           "symbol": "QQQ",
           "label": "Invesco QQQ Trust",
-          "target": 0.0545
+          "target": 0.046784
         },
-        {
-          "symbol": "VUG",
-          "label": "Vanguard Growth ETF",
-          "target": 0.0364
-        },
-        {
-          "symbol": "SCHG",
-          "label": "Schwab U.S. Large-Cap Growth ETF",
-          "target": 0.0273
-        }
-      ]
-    },
-    {
-      "name": "Equity ETF - US Small/Mid Cap",
-      "color": "#3b82f6",
-      "items": [
         {
           "symbol": "IWM",
           "label": "iShares Russell 2000 ETF",
-          "target": 0.0364
-        },
-        {
-          "symbol": "IJH",
-          "label": "iShares Core S&P Mid-Cap ETF",
-          "target": 0.0273
-        },
-        {
-          "symbol": "VB",
-          "label": "Vanguard Small-Cap ETF",
-          "target": 0.0273
+          "target": 0.023392
         }
       ]
     },
     {
-      "name": "Equity ETF - International Developed",
+      "name": "Fixed Income ETF - US Rates",
       "color": "#0ea5e9",
       "items": [
         {
-          "symbol": "VEA",
-          "label": "Vanguard FTSE Developed Markets ETF",
-          "target": 0.0364
-        },
-        {
-          "symbol": "IEFA",
-          "label": "iShares Core MSCI EAFE ETF",
-          "target": 0.0273
-        },
-        {
-          "symbol": "EWJ",
-          "label": "iShares MSCI Japan ETF",
-          "target": 0.0182
-        }
-      ]
-    },
-    {
-      "name": "Equity ETF - Emerging Markets",
-      "color": "#06b6d4",
-      "items": [
-        {
-          "symbol": "VWO",
-          "label": "Vanguard FTSE Emerging Markets ETF",
-          "target": 0.0273
-        },
-        {
-          "symbol": "IEMG",
-          "label": "iShares Core MSCI Emerging Markets ETF",
-          "target": 0.0273
-        },
-        {
-          "symbol": "FXI",
-          "label": "iShares China Large-Cap ETF",
-          "target": 0.0136
-        },
-        {
-          "symbol": "INDA",
-          "label": "iShares MSCI India ETF",
-          "target": 0.0136
-        }
-      ]
-    },
-    {
-      "name": "Equity ETF - Sector & Thematic",
-      "color": "#8b5cf6",
-      "items": [
-        {
-          "symbol": "XLK",
-          "label": "Technology Select Sector SPDR Fund",
-          "target": 0.0227
-        },
-        {
-          "symbol": "XLF",
-          "label": "Financial Select Sector SPDR Fund",
-          "target": 0.0182
-        },
-        {
-          "symbol": "XLE",
-          "label": "Energy Select Sector SPDR Fund",
-          "target": 0.0182
-        },
-        {
-          "symbol": "XLV",
-          "label": "Health Care Select Sector SPDR Fund",
-          "target": 0.0182
-        }
-      ]
-    },
-    {
-      "name": "Fixed Income ETF - US Treasury",
-      "color": "#10b981",
-      "items": [
-        {
-          "symbol": "SHY",
-          "label": "iShares 1-3 Year Treasury Bond ETF",
-          "target": 0.0273
-        },
-        {
           "symbol": "IEF",
           "label": "iShares 7-10 Year Treasury Bond ETF",
-          "target": 0.0273
+          "target": 0.040936
         },
         {
           "symbol": "TLT",
           "label": "iShares 20+ Year Treasury Bond ETF",
-          "target": 0.0273
+          "target": 0.035088
+        },
+        {
+          "symbol": "SHY",
+          "label": "iShares 1-3 Year Treasury Bond ETF",
+          "target": 0.023392
         }
       ]
     },
     {
-      "name": "Fixed Income ETF - IG & HY Credit",
-      "color": "#22c55e",
+      "name": "MSCI Emerging Markets - Core",
+      "color": "#8b5cf6",
       "items": [
         {
-          "symbol": "LQD",
-          "label": "iShares iBoxx $ Investment Grade Corporate Bond ETF",
-          "target": 0.0273
+          "symbol": "EEM",
+          "label": "iShares MSCI Emerging Markets ETF",
+          "target": 0.05848
         },
         {
-          "symbol": "HYG",
-          "label": "iShares iBoxx $ High Yield Corporate Bond ETF",
-          "target": 0.0227
+          "symbol": "IEMG",
+          "label": "iShares Core MSCI Emerging Markets ETF",
+          "target": 0.05848
         },
         {
-          "symbol": "VCIT",
-          "label": "Vanguard Intermediate-Term Corporate Bond ETF",
-          "target": 0.0182
+          "symbol": "VWO",
+          "label": "Vanguard FTSE Emerging Markets ETF",
+          "target": 0.046784
+        },
+        {
+          "symbol": "SPEM",
+          "label": "SPDR Portfolio Emerging Markets ETF",
+          "target": 0.023392
         }
       ]
     },
     {
-      "name": "Inflation / Floating / Cash ETF",
-      "color": "#84cc16",
+      "name": "Country ETF - Turkey Equity",
+      "color": "#dc2626",
       "items": [
         {
-          "symbol": "TIP",
-          "label": "iShares TIPS Bond ETF",
-          "target": 0.0227
-        },
-        {
-          "symbol": "USFR",
-          "label": "WisdomTree Floating Rate Treasury Fund",
-          "target": 0.0182
-        },
-        {
-          "symbol": "BIL",
-          "label": "SPDR Bloomberg 1-3 Month T-Bill ETF",
-          "target": 0.0182
+          "symbol": "TUR",
+          "label": "iShares MSCI Turkey ETF",
+          "target": 0.046784
         }
       ]
     },
     {
-      "name": "Real Assets ETF - REITs & Infrastructure",
-      "color": "#f59e0b",
+      "name": "Country ETF - EM Asia",
+      "color": "#7c3aed",
       "items": [
         {
-          "symbol": "VNQ",
-          "label": "Vanguard Real Estate ETF",
-          "target": 0.0227
+          "symbol": "INDA",
+          "label": "iShares MSCI India ETF",
+          "target": 0.023392
         },
         {
-          "symbol": "REET",
-          "label": "iShares Global REIT ETF",
-          "target": 0.0136
+          "symbol": "MCHI",
+          "label": "iShares MSCI China ETF",
+          "target": 0.023392
         },
         {
-          "symbol": "IGF",
-          "label": "iShares Global Infrastructure ETF",
-          "target": 0.0136
+          "symbol": "EWT",
+          "label": "iShares MSCI Taiwan ETF",
+          "target": 0.017544
+        },
+        {
+          "symbol": "EWY",
+          "label": "iShares MSCI South Korea ETF",
+          "target": 0.017544
         }
       ]
     },
     {
-      "name": "Commodity ETF - Broad / Energy / Agriculture",
-      "color": "#f97316",
+      "name": "Country ETF - EM LatAm",
+      "color": "#16a34a",
       "items": [
         {
-          "symbol": "DBC",
-          "label": "Invesco DB Commodity Index Tracking Fund",
-          "target": 0.0182
+          "symbol": "EWZ",
+          "label": "iShares MSCI Brazil ETF",
+          "target": 0.023392
         },
         {
-          "symbol": "USO",
-          "label": "United States Oil Fund",
-          "target": 0.0136
+          "symbol": "EWW",
+          "label": "iShares MSCI Mexico ETF",
+          "target": 0.014035
         },
         {
-          "symbol": "DBA",
-          "label": "Invesco DB Agriculture Fund",
-          "target": 0.0136
+          "symbol": "ARGT",
+          "label": "Global X MSCI Argentina ETF",
+          "target": 0.009357
+        }
+      ]
+    },
+    {
+      "name": "Country ETF - EM EMEA",
+      "color": "#0891b2",
+      "items": [
+        {
+          "symbol": "EZA",
+          "label": "iShares MSCI South Africa ETF",
+          "target": 0.014035
+        },
+        {
+          "symbol": "EGPT",
+          "label": "VanEck Egypt Index ETF",
+          "target": 0.009357
+        },
+        {
+          "symbol": "GREK",
+          "label": "Global X MSCI Greece ETF",
+          "target": 0.011696
+        }
+      ]
+    },
+    {
+      "name": "EM Sovereign Bonds - USD",
+      "color": "#14b8a6",
+      "items": [
+        {
+          "symbol": "EMB",
+          "label": "iShares J.P. Morgan USD Emerging Markets Bond ETF",
+          "target": 0.040936
+        },
+        {
+          "symbol": "EMHY",
+          "label": "iShares J.P. Morgan EM High Yield Bond ETF",
+          "target": 0.023392
+        },
+        {
+          "symbol": "EMBX",
+          "label": "VanEck Emerging Markets Bond ETF",
+          "target": 0.017544
+        }
+      ]
+    },
+    {
+      "name": "EM Local Currency Bonds",
+      "color": "#06b6d4",
+      "items": [
+        {
+          "symbol": "EMLC",
+          "label": "VanEck J.P. Morgan EM Local Currency Bond ETF",
+          "target": 0.02924
+        },
+        {
+          "symbol": "LEMB",
+          "label": "iShares Emerging Markets Local Currency Bond ETF",
+          "target": 0.023392
         }
       ]
     },
     {
       "name": "Precious Metals ETF",
-      "color": "#eab308",
+      "color": "#a16207",
       "items": [
         {
           "symbol": "GLD",
           "label": "SPDR Gold Shares",
-          "target": 0.0227
-        },
-        {
-          "symbol": "IAU",
-          "label": "iShares Gold Trust",
-          "target": 0.0182
+          "target": 0.023392
         },
         {
           "symbol": "SLV",
           "label": "iShares Silver Trust",
-          "target": 0.0136
+          "target": 0.011696
         }
       ]
     },
     {
-      "name": "Alternative Strategy ETF",
-      "color": "#ef4444",
+      "name": "Real Assets ETF",
+      "color": "#65a30d",
       "items": [
         {
-          "symbol": "CTA",
-          "label": "Simplify Managed Futures Strategy ETF",
-          "target": 0.0136
+          "symbol": "VNQ",
+          "label": "Vanguard Real Estate ETF",
+          "target": 0.017544
         },
         {
-          "symbol": "DBMF",
-          "label": "iMGP DBi Managed Futures Strategy ETF",
-          "target": 0.0136
-        },
-        {
-          "symbol": "BTAL",
-          "label": "AGF U.S. Market Neutral Anti-Beta Fund",
-          "target": 0.009
+          "symbol": "REET",
+          "label": "iShares Global REIT ETF",
+          "target": 0.011689
         }
       ]
     }

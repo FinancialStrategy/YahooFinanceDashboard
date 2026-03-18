@@ -50,6 +50,9 @@ app = FastAPI(title="Institutional Quant Platform")
 RISK_FREE_RATE = 0.035
 BENCHMARK_SYMBOL = "^GSPC"
 TRADING_DAYS = 252
+EM_BENCHMARK_SYMBOLS = ["EEM", "IEMG", "VWO", "SPEM"]
+TURKEY_EQUITY_SYMBOLS = ["TUR"]
+TURKEY_BOND_PROXY_SYMBOLS = ["EMB", "EMLC", "EMHY", "EMBX", "LEMB"]
 
 CACHE = {
     "snapshot": None,
@@ -1178,6 +1181,134 @@ def api_technical(payload: dict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+
+def _download_close_matrix(symbols, period="5y", interval="1d"):
+    if not symbols:
+        raise RuntimeError("No symbols supplied")
+    frames = {}
+    for sym in symbols:
+        try:
+            s = _download_close(sym, period=period, interval=interval)
+            frames[sym] = s.rename(sym)
+        except Exception:
+            continue
+    if not frames:
+        raise RuntimeError("No price histories could be downloaded for the selected symbols")
+    df = pd.concat(frames.values(), axis=1).sort_index().ffill().dropna(how="all")
+    return df
+
+
+def _series_records(s: pd.Series):
+    return [{"date": pd.to_datetime(i).strftime("%Y-%m-%d"), "value": float(v)} for i, v in s.dropna().items()]
+
+
+def _compare_symbol_block(symbol: str, period: str = "5y"):
+    close = _download_close(symbol, period=period, interval="1d")
+    returns = close.pct_change().dropna()
+    metrics = _quant_metrics(returns)
+    dd = compute_drawdown(returns)[1]
+    rv = returns.rolling(63).std() * np.sqrt(TRADING_DAYS)
+    return {
+        "symbol": symbol,
+        "latest_price": float(close.iloc[-1]),
+        "metrics": metrics,
+        "price": _series_records(close),
+        "cumulative": _series_records((1 + returns).cumprod()),
+        "drawdown": _series_records(dd),
+        "rolling_vol": _series_records(rv)
+    }
+
+
+def build_msci_em_turkey_analysis(period: str = "5y"):
+    universe = load_universe()
+    items = flatten_universe(universe)
+    universe_symbols = {x["symbol"] for x in items}
+
+    em_core = [s for s in EM_BENCHMARK_SYMBOLS if s in universe_symbols]
+    turkey_equity = [s for s in TURKEY_EQUITY_SYMBOLS if s in universe_symbols]
+    turkey_bond = [s for s in TURKEY_BOND_PROXY_SYMBOLS if s in universe_symbols]
+
+    em_country_symbols = [x["symbol"] for x in items if x["group"].startswith("Country ETF - EM") or x["group"].startswith("Country ETF - Turkey")]
+
+    focus = []
+    for s in em_core + turkey_equity + turkey_bond + em_country_symbols:
+        if s not in focus:
+            focus.append(s)
+
+    price_df = _download_close_matrix(focus, period=period, interval="1d")
+    ret_df = price_df.pct_change().dropna(how="all")
+
+    metrics_rows = []
+    labels = label_map()
+    groups = symbol_group_map()
+    for sym in ret_df.columns:
+        r = ret_df[sym].dropna()
+        if len(r) < 40:
+            continue
+        m = _quant_metrics(r)
+        metrics_rows.append({
+            "symbol": sym,
+            "label": labels.get(sym, sym),
+            "group": groups.get(sym, "Unknown"),
+            **m
+        })
+
+    metrics_rows = sorted(metrics_rows, key=lambda x: (x.get("sharpe") if x.get("sharpe") is not None else -999), reverse=True)
+
+    cum_df = (1 + ret_df).cumprod()
+    rolling_vol_df = ret_df.rolling(63).std() * np.sqrt(TRADING_DAYS)
+
+    def chart_records(symbols):
+        out = {}
+        for sym in symbols:
+            if sym in cum_df.columns:
+                out[sym] = {
+                    "label": labels.get(sym, sym),
+                    "group": groups.get(sym, "Unknown"),
+                    "cumulative": _series_records(cum_df[sym]),
+                    "rolling_vol": _series_records(rolling_vol_df[sym]),
+                }
+        return out
+
+    turkey_equity_blocks = []
+    for sym in turkey_equity:
+        if sym in price_df.columns:
+            turkey_equity_blocks.append(_compare_symbol_block(sym, period=period))
+
+    turkey_bond_blocks = []
+    for sym in turkey_bond:
+        if sym in price_df.columns:
+            turkey_bond_blocks.append(_compare_symbol_block(sym, period=period))
+
+    return {
+        "period": period,
+        "em_core_symbols": em_core,
+        "turkey_equity_symbols": turkey_equity,
+        "turkey_bond_proxy_symbols": [b["symbol"] for b in turkey_bond_blocks],
+        "metrics_table": metrics_rows,
+        "em_core_charts": chart_records(em_core),
+        "country_em_charts": chart_records(em_country_symbols),
+        "turkey_equity": turkey_equity_blocks,
+        "turkey_bond_proxies": turkey_bond_blocks,
+        "notes": [
+            "Turkey equity sleeve uses TUR when available.",
+            "Turkey fixed-income sleeve is modeled with emerging-markets bond proxies because a dedicated U.S.-listed single-country Turkey sovereign bond ETF is not generally available in this universe."
+        ]
+    }
+
+
+@app.post("/api/msci-em-analysis")
+def api_msci_em_analysis(payload: dict = Body(...)):
+    try:
+        period = payload.get("period", "5y")
+        if period not in {"1y", "2y", "5y", "10y", "max"}:
+            period = "5y"
+        result = build_msci_em_turkey_analysis(period=period)
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 def root():
