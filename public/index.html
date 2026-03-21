@@ -1126,20 +1126,37 @@
 
     function applySavedWeights(newRows, oldRows) {
       const oldMap = new Map(oldRows.map(r => [r.symbol, r.current_weight]));
-      let hasSaved = false;
+      let savedCount = 0;
 
       newRows.forEach(row => {
         if (oldMap.has(row.symbol)) {
           row.current_weight = Number(oldMap.get(row.symbol) || 0);
-          hasSaved = true;
+          savedCount += 1;
         }
       });
 
-      if (!hasSaved) {
+      // Seed missing weights from target profile when available
+      const missing = newRows.filter(row => !oldMap.has(row.symbol));
+      const targetSeedSum = missing.reduce((sum, row) => sum + (parseFloat(row.target) || 0), 0);
+      if (missing.length) {
+        if (targetSeedSum > 0) {
+          missing.forEach(row => {
+            row.current_weight = Number(row.target || 0);
+          });
+        } else {
+          const eq = 100 / Math.max(newRows.length, 1);
+          missing.forEach(row => {
+            row.current_weight = eq;
+          });
+        }
+      }
+
+      const total = newRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
+      const positive = newRows.filter(row => (parseFloat(row.current_weight) || 0) > 0).length;
+
+      // If the restored state is too sparse or invalid, reset the current filtered universe cleanly
+      if (!savedCount || total <= 0 || total > 100 || positive < Math.min(2, newRows.length)) {
         initializeWeights(newRows);
-      } else {
-        const total = newRows.reduce((sum, row) => sum + (parseFloat(row.current_weight) || 0), 0);
-        if (total > 100) initializeWeights(newRows);
       }
     }
 
@@ -1888,6 +1905,43 @@
       `;
     }
 
+
+    function ensureConstructionReadyWeights() {
+      const rows = filteredRows();
+      const strategy = document.getElementById("opt-strategy")?.value || "max_sharpe";
+      const minRequired = strategy === "prior_only" ? 1 : 2;
+
+      if (!rows.length || rows.length < minRequired) return { adjusted: false, rows };
+
+      let positiveRows = rows.filter(r => Number(r.current_weight || 0) > 0);
+      if (positiveRows.length >= minRequired) return { adjusted: false, rows };
+
+      // First attempt: use target-based initialization for the visible universe
+      initializeWeights(rows);
+      positiveRows = rows.filter(r => Number(r.current_weight || 0) > 0);
+
+      // Second attempt: enforce equal weights if targets are sparse/zero
+      if (positiveRows.length < minRequired) {
+        const eq = 100 / Math.max(rows.length, 1);
+        rows.forEach(r => { r.current_weight = Number(eq.toFixed(2)); });
+        // fix final row rounding
+        let running = 0;
+        rows.forEach((r, idx) => {
+          if (idx < rows.length - 1) {
+            r.current_weight = Number(eq.toFixed(2));
+            running += r.current_weight;
+          } else {
+            r.current_weight = Number((100 - running).toFixed(2));
+          }
+        });
+      }
+
+      updateWeightTotal();
+      renderTable();
+      renderConstructionSelectionSummary();
+      return { adjusted: true, rows };
+    }
+
     function validateConstructionRequest() {
       const rows = filteredRows();
       const strategy = document.getElementById("opt-strategy")?.value || "max_sharpe";
@@ -1903,12 +1957,16 @@
         };
       }
 
-      const positiveWeights = rows.filter(r => Number(r.current_weight || 0) > 0).length;
+      let positiveWeights = rows.filter(r => Number(r.current_weight || 0) > 0).length;
       if (positiveWeights < minRequired) {
-        return {
-          ok: false,
-          message: `Only ${positiveWeights} instrument(s) have positive weights in the current universe. Assign positive weights to at least ${minRequired} instruments before running construction.`
-        };
+        const repaired = ensureConstructionReadyWeights();
+        positiveWeights = repaired.rows.filter(r => Number(r.current_weight || 0) > 0).length;
+        if (positiveWeights < minRequired) {
+          return {
+            ok: false,
+            message: `Only ${positiveWeights} instrument(s) have positive weights in the current universe. The system attempted to repair weights automatically but the visible universe is still not construction-ready. Please broaden the filter or reload the universe.`
+          };
+        }
       }
 
       const minW = parseFloat(document.getElementById("min-weight")?.value || "0");
