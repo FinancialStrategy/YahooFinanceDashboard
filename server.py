@@ -53,6 +53,7 @@ app = FastAPI(title="Institutional Quant Platform")
 
 RISK_FREE_RATE = 0.035
 BENCHMARK_SYMBOL = "^GSPC"
+BENCHMARK_FALLBACKS = ["^GSPC", "SPY", "IVV", "VOO"]
 TRADING_DAYS = 252
 
 MAJOR_WORLD_INDICES = [
@@ -838,14 +839,17 @@ def build_portfolio_context(payload):
         raise RuntimeError(f"The selected asset-class universe contains only {len(symbols)} instrument(s). {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering.'}")
 
     labels = label_map()
-    price_symbols = symbols + [BENCHMARK_SYMBOL]
+    benchmark_candidates = []
+    for sym in BENCHMARK_FALLBACKS:
+        if sym not in benchmark_candidates:
+            benchmark_candidates.append(sym)
+    price_symbols = list(dict.fromkeys(symbols + benchmark_candidates))
     price_df = download_price_matrix(price_symbols, period="2y", interval="1d")
 
-    if BENCHMARK_SYMBOL not in price_df.columns:
-        raise RuntimeError("Benchmark could not be downloaded")
+    benchmark_prices, benchmark_symbol_used = resolve_benchmark_price_series(price_df)
+    benchmark_available = benchmark_prices is not None and not benchmark_prices.empty
 
-    benchmark_prices = price_df[BENCHMARK_SYMBOL].copy()
-    prices = price_df.drop(columns=[BENCHMARK_SYMBOL], errors="ignore")
+    prices = price_df.drop(columns=[c for c in benchmark_candidates if c in price_df.columns], errors="ignore")
 
     if prices.shape[1] < min_required_assets:
         raise RuntimeError(f"Only {prices.shape[1]} instrument(s) remained after price-data cleaning. {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering and data cleaning.'}")
@@ -868,7 +872,7 @@ def build_portfolio_context(payload):
     returns = prices.pct_change().dropna()
     cov_returns = returns.cov() * TRADING_DAYS
 
-    benchmark_returns = benchmark_prices.pct_change().dropna()
+    benchmark_returns = benchmark_prices.pct_change().dropna() if benchmark_available else pd.Series(dtype=float)
 
     weight_series = pd.Series(weights).reindex(prices.columns).fillna(0.0)
     prior_weight_series = pd.Series(prior_weights).reindex(prices.columns).fillna(0.0)
@@ -877,7 +881,7 @@ def build_portfolio_context(payload):
     aligned = pd.concat(
         [portfolio_returns.rename("portfolio"), benchmark_returns.rename("benchmark")],
         axis=1
-    ).dropna()
+    ).dropna() if benchmark_available else pd.DataFrame({"portfolio": portfolio_returns}).dropna()
 
     beta = None
     alpha_ann = None
@@ -1547,7 +1551,7 @@ def api_optimization(payload: dict = Body(...)):
 
         result = {
             "strategy": ctx["strategy"],
-            "benchmark_symbol": BENCHMARK_SYMBOL,
+            "benchmark_symbol": (benchmark_symbol_used if benchmark_available else None),
             "risk_free_rate": RISK_FREE_RATE,
             "used_symbols": list(ctx["prices"].columns),
             "metrics": ctx["metrics"],
@@ -1583,14 +1587,14 @@ def api_analytics(payload: dict = Body(...)):
         rolling_beta = compute_rolling_beta(ctx["aligned"], window=63)
         regimes = compute_hmm_regimes(ctx["portfolio_returns"], n_states=3)
 
-        benchmark_cumulative = (1 + ctx["aligned"]["benchmark"]).cumprod()
+        benchmark_cumulative = (1 + ctx["aligned"]["benchmark"]).cumprod() if ("benchmark" in ctx["aligned"].columns) else pd.Series(dtype=float)
         portfolio_cumulative = (1 + ctx["aligned"]["portfolio"]).cumprod()
         relative_performance = compute_relative_performance(ctx["aligned"])
         rolling_ir = compute_rolling_information_ratio(ctx["aligned"], window=63)
 
         result = {
             "strategy": ctx["strategy"],
-            "benchmark_symbol": BENCHMARK_SYMBOL,
+            "benchmark_symbol": (benchmark_symbol_used if benchmark_available else None),
             "benchmark_summary": ctx["metrics"],
             "rolling_sharpe": series_to_records(rolling_sharpe),
             "cumulative": series_to_records(cumulative),
@@ -1598,7 +1602,7 @@ def api_analytics(payload: dict = Body(...)):
             "rolling_beta": series_to_records(rolling_beta),
             "regimes": regimes,
             "portfolio_cumulative": series_to_records(portfolio_cumulative),
-            "benchmark_cumulative": series_to_records(benchmark_cumulative),
+            "benchmark_cumulative": series_to_records(benchmark_cumulative) if not benchmark_cumulative.empty else [],
             "relative_performance": series_to_records(relative_performance),
             "rolling_information_ratio": series_to_records(rolling_ir)
         }
@@ -1634,7 +1638,7 @@ def api_risk(payload: dict = Body(...)):
 
         result = {
             "strategy": ctx["strategy"],
-            "benchmark_symbol": BENCHMARK_SYMBOL,
+            "benchmark_symbol": (benchmark_symbol_used if benchmark_available else None),
             "custom": risk_custom,
             "risk_95": risk_95,
             "risk_99": risk_99,
