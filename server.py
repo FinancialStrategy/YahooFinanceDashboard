@@ -556,14 +556,76 @@ def _group_to_symbol_view(group_views, group_map, symbols):
     return symbol_views
 
 
-def _apply_group_constraints(ef, symbols, group_map, group_targets=None, group_bounds=None):
+def _sanitize_group_bounds_for_symbols(symbols, group_map, group_bounds, min_weight, max_weight):
+    present_groups = {}
+    for s in symbols:
+        g = group_map.get(s, "Unknown")
+        present_groups.setdefault(g, []).append(s)
+
+    out = {}
+    for g, members in present_groups.items():
+        cap_min = max(0.0, len(members) * float(min_weight))
+        cap_max = min(1.0, len(members) * float(max_weight))
+        cfg = (group_bounds or {}).get(g, {})
+        mn = float(cfg.get("min", 0.0) or 0.0)
+        mx = float(cfg.get("max", 1.0) or 1.0)
+        mn = max(mn, cap_min)
+        mx = min(mx, cap_max)
+        if mn > mx + 1e-12:
+            raise RuntimeError(
+                f"Infeasible constraint for group '{g}': effective min {mn:.2%} exceeds effective max {mx:.2%}. "
+                f"This usually means asset-class bounds conflict with per-asset min/max weights or too few assets are available in the selected subgroup."
+            )
+        out[g] = {"min": mn, "max": mx}
+    return out
+
+
+def _check_global_bounds_feasibility(bounds):
+    if not bounds:
+        return
+    sum_min = sum(float(v.get("min", 0.0)) for v in bounds.values())
+    sum_max = sum(float(v.get("max", 1.0)) for v in bounds.values())
+    if sum_min > 1.0 + 1e-8 or sum_max < 1.0 - 1e-8:
+        raise RuntimeError(
+            f"Infeasible asset-class bounds: total minimum is {sum_min:.2%} and total maximum is {sum_max:.2%}. "
+            f"A feasible portfolio requires sum(min bounds) <= 100% <= sum(max bounds)."
+        )
+
+
+def _add_target_bands_to_bounds(base_bounds, group_targets, tolerance=0.03):
+    if not group_targets:
+        return base_bounds, False
+
+    bounds = {g: {"min": float(v["min"]), "max": float(v["max"])} for g, v in (base_bounds or {}).items()}
+    gt = {g: float(v) for g, v in group_targets.items() if g in bounds}
+    if not gt:
+        return bounds, False
+
+    total = sum(max(v, 0.0) for v in gt.values())
+    if total <= 0:
+        return bounds, False
+    gt = {g: max(v, 0.0) / total for g, v in gt.items()}
+
+    trial = {g: {"min": bounds[g]["min"], "max": bounds[g]["max"]} for g in bounds}
+    for g, tgt in gt.items():
+        lo = max(trial[g]["min"], max(0.0, tgt - tolerance))
+        hi = min(trial[g]["max"], min(1.0, tgt + tolerance))
+        if lo > hi + 1e-12:
+            return bounds, False
+        trial[g]["min"] = lo
+        trial[g]["max"] = hi
+
+    sum_min = sum(v["min"] for v in trial.values())
+    sum_max = sum(v["max"] for v in trial.values())
+    if sum_min > 1.0 + 1e-8 or sum_max < 1.0 - 1.0e-8:
+        return bounds, False
+
+    return trial, True
+
+
+def _apply_group_constraints(ef, symbols, group_map, group_bounds=None):
     if cp is None:
         return ef
-    if group_targets:
-        for g, tgt in group_targets.items():
-            idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
-            if idxs:
-                ef.add_constraint(lambda w, idxs=idxs, tgt=float(tgt): cp.sum(w[idxs]) == tgt)
     for g, bounds in (group_bounds or {}).items():
         idxs = [i for i, s in enumerate(symbols) if group_map.get(s, "Unknown") == g]
         if not idxs:
@@ -617,23 +679,31 @@ def _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_view
     except Exception:
         return base_mu
 
+
 def optimize_with_strategy(prices, strategy, target_volatility, target_return, prior_weights=None, group_targets=None, min_weight=0.0, max_weight=1.0, group_map=None, group_bounds=None, group_views=None, view_confidences=None):
     cov_matrix = risk_models.CovarianceShrinkage(prices, frequency=TRADING_DAYS).ledoit_wolf()
     symbols = list(prices.columns)
     if group_map is None:
         group_map = symbol_group_map()
-    mu = _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=group_views, view_confidences=view_confidences) if strategy.startswith("black_litterman") else expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
+
+    if strategy.startswith("black_litterman"):
+        mu = _build_black_litterman_mu(prices, cov_matrix, group_map, symbols, group_views=group_views, view_confidences=view_confidences)
+    else:
+        mu = expected_returns.mean_historical_return(prices, frequency=TRADING_DAYS)
     rets = expected_returns.returns_from_prices(prices)
 
-    # Prior weights (optional)
     if prior_weights is not None:
         prior_weights = normalize_weight_dict(prior_weights, symbols)
 
-    # Group targets / bounds (optional)
     group_targets = _normalize_group_targets(group_targets)
     group_bounds = _normalize_group_bounds(group_bounds)
 
-    # A special mode: use prior weights as the portfolio (no optimization)
+    explicit_group_bounds = _sanitize_group_bounds_for_symbols(symbols, group_map, group_bounds, min_weight, max_weight)
+    _check_global_bounds_feasibility(explicit_group_bounds)
+
+    effective_group_bounds, used_target_bands = _add_target_bands_to_bounds(explicit_group_bounds, group_targets, tolerance=0.03)
+    _check_global_bounds_feasibility(effective_group_bounds)
+
     if strategy == "prior_only":
         if prior_weights is None:
             raise RuntimeError("Prior weights were not supplied.")
@@ -646,85 +716,77 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
         frontier = build_frontier_points(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
         return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
 
+    def _run_strategy_once(bounds_for_run):
+        if strategy == "max_sharpe":
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            _apply_group_constraints(ef, symbols, group_map, group_bounds=bounds_for_run)
+            ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
+            return ef.clean_weights(), ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-    if strategy == "max_sharpe":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        elif strategy == "min_volatility":
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            _apply_group_constraints(ef, symbols, group_map, group_bounds=bounds_for_run)
+            ef.min_volatility()
+            return ef.clean_weights(), ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        elif strategy == "max_quadratic_utility":
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            _apply_group_constraints(ef, symbols, group_map, group_bounds=bounds_for_run)
+            ef.max_quadratic_utility(risk_aversion=1.0)
+            return ef.clean_weights(), ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-    elif strategy == "min_volatility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        elif strategy == "efficient_risk":
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            _apply_group_constraints(ef, symbols, group_map, group_bounds=bounds_for_run)
+            ef.efficient_risk(target_volatility=float(target_volatility))
+            return ef.clean_weights(), ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.min_volatility()
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        elif strategy == "efficient_return":
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            _apply_group_constraints(ef, symbols, group_map, group_bounds=bounds_for_run)
+            ef.efficient_return(target_return=float(target_return))
+            return ef.clean_weights(), ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-    elif strategy == "max_quadratic_utility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        elif strategy == "black_litterman_max_sharpe":
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            _apply_group_constraints(ef, symbols, group_map, group_bounds=bounds_for_run)
+            ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
+            return ef.clean_weights(), ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.max_quadratic_utility(risk_aversion=1.0)
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        elif strategy == "black_litterman_min_volatility":
+            ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            _apply_group_constraints(ef, symbols, group_map, group_bounds=bounds_for_run)
+            ef.min_volatility()
+            return ef.clean_weights(), ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-    elif strategy == "efficient_risk":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        elif strategy == "hrp":
+            hrp = HRPOpt(rets)
+            return hrp.optimize(), hrp.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.efficient_risk(target_volatility=float(target_volatility))
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        elif strategy == "cla_max_sharpe":
+            cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            cla.max_sharpe()
+            return cla.clean_weights(), cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-    elif strategy == "efficient_return":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+        elif strategy == "cla_min_volatility":
+            cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
+            cla.min_volatility()
+            return cla.clean_weights(), cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
 
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.efficient_return(target_return=float(target_return))
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
 
-    elif strategy == "black_litterman_max_sharpe":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.max_sharpe(risk_free_rate=RISK_FREE_RATE)
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "black_litterman_min_volatility":
-        ef = EfficientFrontier(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        _apply_group_constraints(ef, symbols, group_map, group_targets=group_targets, group_bounds=group_bounds)
-        ef.min_volatility()
-        weights = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "hrp":
-        hrp = HRPOpt(rets)
-        weights = hrp.optimize()
-        perf = hrp.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "cla_max_sharpe":
-        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        cla.max_sharpe()
-        weights = cla.clean_weights()
-        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    elif strategy == "cla_min_volatility":
-        cla = CLA(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
-        cla.min_volatility()
-        weights = cla.clean_weights()
-        perf = cla.portfolio_performance(risk_free_rate=RISK_FREE_RATE)
-
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
+    try:
+        weights, perf = _run_strategy_once(effective_group_bounds)
+    except Exception as e:
+        msg = str(e)
+        if used_target_bands and ("infeasible" in msg.lower() or "solver status" in msg.lower()):
+            weights, perf = _run_strategy_once(explicit_group_bounds)
+        else:
+            raise
 
     frontier = build_frontier_points(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
     return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
-
-
 def resolve_symbols(payload):
     symbols = payload.get("symbols", [])
     family_filter = payload.get("family_filter", "ALL")
