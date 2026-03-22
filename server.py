@@ -805,6 +805,18 @@ def resolve_symbols(payload):
     return symbols
 
 
+
+def resolve_benchmark_price_series(price_df):
+    """
+    Return the first usable benchmark series from the fallback chain.
+    """
+    for sym in BENCHMARK_FALLBACKS:
+        if sym in price_df.columns:
+            s = pd.to_numeric(price_df[sym], errors="coerce").dropna()
+            if not s.empty:
+                return s, sym
+    return None, None
+
 def build_portfolio_context(payload):
     strategy = payload.get("strategy", "max_sharpe")
     target_volatility = float(payload.get("target_volatility", 0.15))
