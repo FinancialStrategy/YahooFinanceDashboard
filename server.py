@@ -557,48 +557,91 @@ def _group_to_symbol_view(group_views, group_map, symbols):
     return symbol_views
 
 
-def _sanitize_group_bounds_for_symbols(symbols, group_map, group_bounds, min_weight, max_weight):
+
+def _sanitize_group_bounds_for_symbols(symbols, group_map, group_bounds, min_weight, max_weight, group_targets=None):
+    """
+    Only create class-level hard bounds for groups explicitly constrained by the user
+    or referenced by target bands. Do NOT manufacture hard class bounds for every
+    present group from per-asset caps, because that duplicates per-asset constraints
+    and can make an otherwise feasible problem look infeasible.
+    """
     present_groups = {}
     for s in symbols:
         g = group_map.get(s, "Unknown")
         present_groups.setdefault(g, []).append(s)
 
+    constrained_groups = set()
+    if isinstance(group_bounds, dict):
+        constrained_groups.update(str(g) for g in group_bounds.keys())
+    if isinstance(group_targets, dict):
+        constrained_groups.update(str(g) for g in group_targets.keys())
+
     out = {}
-    for g, members in present_groups.items():
+    for g in sorted(constrained_groups):
+        members = present_groups.get(g, [])
+        if not members:
+            continue
+
         cap_min = max(0.0, len(members) * float(min_weight))
         cap_max = min(1.0, len(members) * float(max_weight))
+
         cfg = (group_bounds or {}).get(g, {})
-        mn = float(cfg.get("min", 0.0) or 0.0)
-        mx = float(cfg.get("max", 1.0) or 1.0)
-        mn = max(mn, cap_min)
-        mx = min(mx, cap_max)
+        has_explicit = isinstance(cfg, dict) and (("min" in cfg) or ("max" in cfg))
+
+        mn = float(cfg.get("min", 0.0) or 0.0) if has_explicit else 0.0
+        mx = float(cfg.get("max", 1.0) or 1.0) if has_explicit else 1.0
+
+        # Intersect only explicit class bounds with structural capacity.
+        mn = max(mn, cap_min if has_explicit else 0.0)
+        mx = min(mx, cap_max if has_explicit else 1.0)
+
         if mn > mx + 1e-12:
             raise RuntimeError(
                 f"Infeasible constraint for group '{g}': effective min {mn:.2%} exceeds effective max {mx:.2%}. "
-                f"This usually means asset-class bounds conflict with per-asset min/max weights or too few assets are available in the selected subgroup."
+                f"This means the class bounds conflict with the number of available assets and/or per-asset min/max weights."
             )
         out[g] = {"min": mn, "max": mx}
     return out
 
 
-def _check_global_bounds_feasibility(bounds):
+def _check_global_bounds_feasibility(bounds, all_present_groups=None):
+    """
+    Global feasibility logic:
+    - sum(min bounds) must always be <= 1
+    - sum(max bounds) only needs to be >= 1 if ALL present groups are explicitly constrained.
+      If some groups are unconstrained, they can absorb residual weight.
+    """
     if not bounds:
         return
     sum_min = sum(float(v.get("min", 0.0)) for v in bounds.values())
-    sum_max = sum(float(v.get("max", 1.0)) for v in bounds.values())
-    if sum_min > 1.0 + 1e-8 or sum_max < 1.0 - 1e-8:
+    if sum_min > 1.0 + 1e-8:
         raise RuntimeError(
-            f"Infeasible asset-class bounds: total minimum is {sum_min:.2%} and total maximum is {sum_max:.2%}. "
-            f"A feasible portfolio requires sum(min bounds) <= 100% <= sum(max bounds)."
+            f"Infeasible asset-class bounds: total minimum is {sum_min:.2%}, which exceeds 100%. "
+            f"A feasible portfolio requires sum(min bounds) <= 100%."
         )
+
+    if all_present_groups is not None:
+        present = set(str(g) for g in all_present_groups)
+        constrained = set(str(g) for g in bounds.keys())
+        if present and constrained == present:
+            sum_max = sum(float(v.get('max', 1.0)) for v in bounds.values())
+            if sum_max < 1.0 - 1e-8:
+                raise RuntimeError(
+                    f"Infeasible asset-class bounds: total minimum is {sum_min:.2%} and total maximum is {sum_max:.2%}. "
+                    f"A feasible portfolio requires sum(min bounds) <= 100% <= sum(max bounds)."
+                )
 
 
 def _add_target_bands_to_bounds(base_bounds, group_targets, tolerance=0.03):
+    """
+    Apply soft target bands only to groups that actually have a target.
+    If a target band conflicts with explicit hard bounds, fall back gracefully.
+    """
     if not group_targets:
         return base_bounds, False
 
     bounds = {g: {"min": float(v["min"]), "max": float(v["max"])} for g, v in (base_bounds or {}).items()}
-    gt = {g: float(v) for g, v in group_targets.items() if g in bounds}
+    gt = {str(g): float(v) for g, v in group_targets.items() if v is not None}
     if not gt:
         return bounds, False
 
@@ -607,7 +650,7 @@ def _add_target_bands_to_bounds(base_bounds, group_targets, tolerance=0.03):
         return bounds, False
     gt = {g: max(v, 0.0) / total for g, v in gt.items()}
 
-    trial = {g: {"min": bounds[g]["min"], "max": bounds[g]["max"]} for g in bounds}
+    trial = {g: {"min": bounds.get(g, {}).get("min", 0.0), "max": bounds.get(g, {}).get("max", 1.0)} for g in set(bounds) | set(gt)}
     for g, tgt in gt.items():
         lo = max(trial[g]["min"], max(0.0, tgt - tolerance))
         hi = min(trial[g]["max"], min(1.0, tgt + tolerance))
@@ -618,7 +661,7 @@ def _add_target_bands_to_bounds(base_bounds, group_targets, tolerance=0.03):
 
     sum_min = sum(v["min"] for v in trial.values())
     sum_max = sum(v["max"] for v in trial.values())
-    if sum_min > 1.0 + 1e-8 or sum_max < 1.0 - 1.0e-8:
+    if sum_min > 1.0 + 1e-8 or sum_max < 1.0 - 1e-8:
         return bounds, False
 
     return trial, True
@@ -699,11 +742,14 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     group_targets = _normalize_group_targets(group_targets)
     group_bounds = _normalize_group_bounds(group_bounds)
 
-    explicit_group_bounds = _sanitize_group_bounds_for_symbols(symbols, group_map, group_bounds, min_weight, max_weight)
-    _check_global_bounds_feasibility(explicit_group_bounds)
+    present_groups = sorted({group_map.get(s, "Unknown") for s in symbols})
+    explicit_group_bounds = _sanitize_group_bounds_for_symbols(
+        symbols, group_map, group_bounds, min_weight, max_weight, group_targets=group_targets
+    )
+    _check_global_bounds_feasibility(explicit_group_bounds, all_present_groups=present_groups)
 
     effective_group_bounds, used_target_bands = _add_target_bands_to_bounds(explicit_group_bounds, group_targets, tolerance=0.03)
-    _check_global_bounds_feasibility(effective_group_bounds)
+    _check_global_bounds_feasibility(effective_group_bounds, all_present_groups=present_groups)
 
     if strategy == "prior_only":
         if prior_weights is None:
@@ -835,8 +881,9 @@ def build_portfolio_context(payload):
     max_weight = float(payload.get("max_weight", 1.0))
     if max_weight <= 0 or max_weight > 1:
         max_weight = 1.0
-    if min_weight < 0 or min_weight >= max_weight:
+    if min_weight < 0:
         min_weight = 0.0
+
 
     group_map = symbol_group_map()
     prior_weights = normalize_weight_dict(prior_weights_input, symbols)
@@ -849,6 +896,26 @@ def build_portfolio_context(payload):
     min_required_assets = 1 if strategy == "prior_only" else 2
     if len(symbols) < min_required_assets:
         raise RuntimeError(f"The selected asset-class universe contains only {len(symbols)} instrument(s). {'Prior-only mode requires at least 1 instrument.' if strategy == 'prior_only' else 'Portfolio construction requires at least 2 investable instruments after filtering.'}")
+
+    # Auto-relax impossible per-asset weight settings for the current filtered universe.
+    # If n * max_weight < 1, the portfolio can never reach 100%.
+    # If n * min_weight > 1, the minimums alone already exceed 100%.
+    n_assets = len(symbols)
+    feasibility_notes = []
+    if n_assets > 0 and max_weight * n_assets < 1.0 - 1e-8:
+        old_max_weight = max_weight
+        max_weight = min(1.0, 1.0 / n_assets + 1e-6)
+        feasibility_notes.append(
+            f"Per-asset max weight was auto-relaxed from {old_max_weight:.2%} to {max_weight:.2%} because {n_assets} assets cannot sum to 100% otherwise."
+        )
+    if n_assets > 0 and min_weight * n_assets > 1.0 + 1e-8:
+        old_min_weight = min_weight
+        min_weight = max(0.0, 1.0 / n_assets - 1e-6)
+        feasibility_notes.append(
+            f"Per-asset min weight was auto-relaxed from {old_min_weight:.2%} to {min_weight:.2%} because the selected universe would otherwise force total minimum allocation above 100%."
+        )
+    if min_weight >= max_weight:
+        min_weight = 0.0
 
     labels = label_map()
     benchmark_candidates = []
