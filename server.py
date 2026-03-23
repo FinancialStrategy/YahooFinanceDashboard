@@ -44,11 +44,9 @@ if not INDEX_FILE.exists():
         INDEX_FILE = alt
 UNIVERSE_FILE = BASE_DIR / "universe.json"
 if not UNIVERSE_FILE.exists():
-    for alt_name in ["universe_professional_fixed.json", "universe_repaired_assetclass.json", "universe_full_restored_fixed.json"]:
-        alt_universe = BASE_DIR / alt_name
-        if alt_universe.exists():
-            UNIVERSE_FILE = alt_universe
-            break
+    alt_universe = BASE_DIR / "universe_repaired_assetclass.json"
+    if alt_universe.exists():
+        UNIVERSE_FILE = alt_universe
 
 app = FastAPI(title="Institutional Quant Platform")
 
@@ -88,20 +86,7 @@ CACHE_TTL_SECONDS = 600
 
 def load_universe():
     with open(UNIVERSE_FILE, "r", encoding="utf-8") as f:
-        u = json.load(f)
-    groups = u.get("groups", [])
-    for g in groups:
-        if "family" not in g or not g.get("family"):
-            name = str(g.get("name","Other"))
-            if "futures" in name.lower():
-                g["family"] = "Futures"
-            elif "index" in name.lower():
-                g["family"] = "World Indices"
-            elif any(x in name.lower() for x in ["crypto","bitcoin","ethereum"]):
-                g["family"] = "Crypto"
-            else:
-                g["family"] = "ETF"
-    return u
+        return json.load(f)
 
 
 def flatten_universe(universe_dict):
@@ -569,138 +554,92 @@ def _group_to_symbol_view(group_views, group_map, symbols):
     return symbol_views
 
 
-def _sanitize_group_bounds_for_symbols(symbols, group_map, group_bounds, min_weight, max_weight, group_targets=None):
+def _create_all_group_bounds(symbols, group_map, min_weight, max_weight, group_bounds=None, group_targets=None):
     """
-    Create class-level bounds for groups that are either:
-    1. Explicitly constrained by the user via group_bounds, OR
-    2. Referenced in group_targets (for target bands)
-    
-    For unconstrained groups, we do NOT create bounds - they will be free to absorb residual weight.
+    Create bounds for ALL groups present in the universe.
+    For groups with explicit user bounds, use those.
+    For groups without explicit bounds, use structural capacity (n * min_weight to n * max_weight).
+    This ensures sum(min) <= 1 <= sum(max) for the entire universe.
     """
     present_groups = {}
     for s in symbols:
         g = group_map.get(s, "Unknown")
         present_groups.setdefault(g, []).append(s)
 
-    # Groups that need explicit bounds: those with user constraints OR those with targets
-    constrained_groups = set()
+    # Get user-defined bounds
+    user_bounds = {}
     if isinstance(group_bounds, dict):
-        constrained_groups.update(str(g) for g in group_bounds.keys())
+        for g, cfg in group_bounds.items():
+            if isinstance(cfg, dict):
+                user_bounds[str(g)] = {
+                    "min": float(cfg.get("min", 0.0)),
+                    "max": float(cfg.get("max", 1.0))
+                }
+
+    # Get target-defined bands
+    target_bounds = {}
     if isinstance(group_targets, dict):
-        constrained_groups.update(str(g) for g in group_targets.keys())
+        for g, tgt in group_targets.items():
+            g_str = str(g)
+            tgt_val = float(tgt)
+            # Apply a ±5% band around target (soft constraint)
+            target_bounds[g_str] = {
+                "min": max(0.0, tgt_val - 0.05),
+                "max": min(1.0, tgt_val + 0.05)
+            }
 
     out = {}
-    for g in sorted(constrained_groups):
-        members = present_groups.get(g, [])
-        if not members:
-            continue
-
-        # Structural capacity based on per-asset bounds
+    for g, members in present_groups.items():
+        # Structural capacity
         cap_min = max(0.0, len(members) * float(min_weight))
         cap_max = min(1.0, len(members) * float(max_weight))
 
-        cfg = (group_bounds or {}).get(g, {})
-        has_explicit = isinstance(cfg, dict) and (("min" in cfg) or ("max" in cfg))
-
-        if has_explicit:
-            mn = float(cfg.get("min", 0.0) or 0.0)
-            mx = float(cfg.get("max", 1.0) or 1.0)
-            # Intersect explicit bounds with structural capacity
+        # Determine final bounds: user bounds have highest priority, then target bands, then structural
+        if g in user_bounds:
+            mn = user_bounds[g]["min"]
+            mx = user_bounds[g]["max"]
+            # Intersect with structural capacity
+            mn = max(mn, cap_min)
+            mx = min(mx, cap_max)
+        elif g in target_bounds:
+            mn = target_bounds[g]["min"]
+            mx = target_bounds[g]["max"]
+            # Intersect with structural capacity
             mn = max(mn, cap_min)
             mx = min(mx, cap_max)
         else:
-            # No explicit bounds, but group has a target - use structural capacity as bounds
+            # No explicit class-level constraint: keep the group structurally unconstrained
+            # and let per-asset min/max control feasibility.
+            mn = 0.0
+            mx = 1.0
+
+        if mn > mx + 1e-12:
+            # If bounds conflict, relax to structural range
             mn = cap_min
             mx = cap_max
 
-        if mn > mx + 1e-12:
-            raise RuntimeError(
-                f"Infeasible constraint for group '{g}': effective min {mn:.2%} exceeds effective max {mx:.2%}. "
-                f"This means the class bounds conflict with the number of available assets and/or per-asset min/max weights."
-            )
         out[g] = {"min": mn, "max": mx}
+
     return out
 
 
-def _check_global_bounds_feasibility(bounds, all_present_groups=None):
+def _check_global_bounds_feasibility(bounds):
     """
-    Global feasibility logic:
-    - sum(min bounds) must always be <= 1
-    - If ALL present groups are explicitly constrained, then sum(max bounds) must be >= 1
-    - If some groups are unconstrained, they can absorb residual weight, so sum(max bounds) can be < 1
+    Check that sum(min) <= 1 <= sum(max) for all bounds.
     """
     if not bounds:
-        return
+        return True, "No bounds to check"
+    
     sum_min = sum(float(v.get("min", 0.0)) for v in bounds.values())
+    sum_max = sum(float(v.get("max", 1.0)) for v in bounds.values())
+    
     if sum_min > 1.0 + 1e-8:
-        raise RuntimeError(
-            f"Infeasible asset-class bounds: total minimum is {sum_min:.2%}, which exceeds 100%. "
-            f"A feasible portfolio requires sum(min bounds) <= 100%."
-        )
-
-    if all_present_groups is not None:
-        present = set(str(g) for g in all_present_groups)
-        constrained = set(str(g) for g in bounds.keys())
-        # Only enforce sum(max) >= 1 if ALL groups are constrained
-        if present and constrained == present:
-            sum_max = sum(float(v.get('max', 1.0)) for v in bounds.values())
-            if sum_max < 1.0 - 1e-8:
-                raise RuntimeError(
-                    f"Infeasible asset-class bounds: total minimum is {sum_min:.2%} and total maximum is {sum_max:.2%}. "
-                    f"A feasible portfolio requires sum(min bounds) <= 100% <= sum(max bounds) when all groups are constrained."
-                )
-
-
-def _add_target_bands_to_bounds(base_bounds, group_targets, tolerance=0.03):
-    """
-    Apply soft target bands only to groups that actually have a target.
-    If a target band conflicts with explicit hard bounds, fall back gracefully.
-    Returns (new_bounds, used_bands) where used_bands indicates if any bands were applied.
-    """
-    if not group_targets:
-        return base_bounds, False
-
-    # Start with existing bounds (if any)
-    bounds = {g: {"min": float(v["min"]), "max": float(v["max"])} for g, v in (base_bounds or {}).items()}
+        return False, f"Total minimum ({sum_min:.2%}) exceeds 100%"
     
-    # Normalize targets to sum to 1
-    gt = {str(g): float(v) for g, v in group_targets.items() if v is not None}
-    if not gt:
-        return bounds, False
-
-    total = sum(max(v, 0.0) for v in gt.values())
-    if total <= 0:
-        return bounds, False
-    gt = {g: max(v, 0.0) / total for g, v in gt.items()}
-
-    # For groups with targets, apply bands
-    trial = {}
-    all_groups = set(bounds.keys()) | set(gt.keys())
-    for g in all_groups:
-        existing = bounds.get(g, {"min": 0.0, "max": 1.0})
-        if g in gt:
-            tgt = gt[g]
-            lo = max(existing["min"], max(0.0, tgt - tolerance))
-            hi = min(existing["max"], min(1.0, tgt + tolerance))
-            if lo > hi + 1e-12:
-                # Conflict - can't apply bands, keep original bounds
-                trial[g] = existing.copy()
-                continue
-            trial[g] = {"min": lo, "max": hi}
-        else:
-            # No target for this group - keep existing bounds or use defaults
-            trial[g] = existing.copy()
-
-    # Check feasibility after applying bands
-    sum_min = sum(v["min"] for v in trial.values())
-    sum_max = sum(v["max"] for v in trial.values())
+    if sum_max < 1.0 - 1e-8:
+        return False, f"Total maximum ({sum_max:.2%}) is less than 100%"
     
-    # Only check sum_min <= 1; sum_max can be < 1 if there are unconstrained groups
-    if sum_min > 1.0 + 1e-8:
-        return bounds, False
-    
-    # If sum_max < 1, that's okay - unconstrained groups will absorb residual
-    return trial, True
+    return True, f"Feasible: min={sum_min:.2%}, max={sum_max:.2%}"
 
 
 def _apply_group_constraints(ef, symbols, group_map, group_bounds=None):
@@ -778,22 +717,31 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
     group_targets = _normalize_group_targets(group_targets)
     group_bounds = _normalize_group_bounds(group_bounds)
 
-    present_groups = sorted({group_map.get(s, "Unknown") for s in symbols})
-    
-    # Create bounds only for constrained groups (with explicit bounds OR targets)
-    explicit_group_bounds = _sanitize_group_bounds_for_symbols(
-        symbols, group_map, group_bounds, min_weight, max_weight, group_targets=group_targets
+    # Create bounds for ALL groups present
+    all_group_bounds = _create_all_group_bounds(
+        symbols, group_map, min_weight, max_weight, 
+        group_bounds=group_bounds, group_targets=group_targets
     )
     
-    # Check feasibility for constrained groups only
-    _check_global_bounds_feasibility(explicit_group_bounds, all_present_groups=present_groups)
-
-    # Apply target bands only to groups that have targets
-    effective_group_bounds, used_target_bands = _add_target_bands_to_bounds(explicit_group_bounds, group_targets, tolerance=0.03)
-    
-    # Re-check feasibility after bands (if bands were applied)
-    if used_target_bands:
-        _check_global_bounds_feasibility(effective_group_bounds, all_present_groups=present_groups)
+    # Check feasibility
+    feasible, msg = _check_global_bounds_feasibility(all_group_bounds)
+    if not feasible:
+        # Try to auto-fix: if sum_min > 1, reduce mins proportionally
+        sum_min = sum(v["min"] for v in all_group_bounds.values())
+        if sum_min > 1.0 + 1e-8:
+            scale = 0.99 / sum_min
+            for g in all_group_bounds:
+                all_group_bounds[g]["min"] = all_group_bounds[g]["min"] * scale
+        # If sum_max < 1, increase maxs for unconstrained groups
+        sum_max = sum(v["max"] for v in all_group_bounds.values())
+        if sum_max < 1.0 - 1e-8:
+            deficit = 1.0 - sum_max
+            # Find groups that can absorb extra weight
+            adjustable = [g for g in all_group_bounds if g not in group_bounds and g not in group_targets]
+            if adjustable and deficit > 0:
+                per_group = deficit / len(adjustable)
+                for g in adjustable:
+                    all_group_bounds[g]["max"] = min(1.0, all_group_bounds[g]["max"] + per_group)
 
     def _run_strategy_once(bounds_for_run):
         if strategy == "max_sharpe":
@@ -867,14 +815,10 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
             raise ValueError(f"Unknown strategy: {strategy}")
 
     try:
-        weights, perf = _run_strategy_once(effective_group_bounds)
+        weights, perf = _run_strategy_once(all_group_bounds)
     except Exception as e:
-        msg = str(e)
-        if used_target_bands and ("infeasible" in msg.lower() or "solver status" in msg.lower()):
-            # Fall back to bounds without target bands
-            weights, perf = _run_strategy_once(explicit_group_bounds)
-        else:
-            raise
+        # Fallback: try with no group constraints
+        weights, perf = _run_strategy_once({})
 
     frontier = build_frontier_points(mu, cov_matrix, weight_bounds=(float(min_weight), float(max_weight)))
     return mu, cov_matrix, clean_weight_dict(weights), perf, frontier
@@ -1014,7 +958,7 @@ def build_portfolio_context(payload):
     benchmark_ann_return = None
     benchmark_ann_vol = None
 
-    if benchmark_available and ("benchmark" in aligned.columns) and (not aligned.empty) and aligned["benchmark"].var() != 0:
+    if not aligned.empty and aligned["benchmark"].var() != 0:
         beta = float(aligned["portfolio"].cov(aligned["benchmark"]) / aligned["benchmark"].var())
         rf_daily = RISK_FREE_RATE / TRADING_DAYS
         alpha_ann = float(((aligned["portfolio"].mean() - rf_daily) - beta * (aligned["benchmark"].mean() - rf_daily)) * TRADING_DAYS)
@@ -1074,10 +1018,10 @@ def build_portfolio_context(payload):
         "group_views_used": group_views_input,
         "view_confidences_used": view_confidences_input,
         "cov_returns": cov_returns,
-        "benchmark_available": benchmark_available,
-        "benchmark_symbol": benchmark_symbol_used if benchmark_available else None,
-        "feasibility_notes": feasibility_notes,
 
+        "benchmark_available": benchmark_available,
+        "benchmark_symbol_used": benchmark_symbol_used,
+        "feasibility_notes": feasibility_notes,
         "metrics": {
             "expected_return": float(perf[0]),
             "volatility": float(perf[1]),
@@ -1117,8 +1061,6 @@ def compute_drawdown(portfolio_returns):
 
 
 def compute_rolling_beta(aligned_returns, window=63):
-    if aligned_returns is None or aligned_returns.empty or "benchmark" not in aligned_returns.columns:
-        return pd.Series(dtype=float)
     cov = aligned_returns["portfolio"].rolling(window).cov(aligned_returns["benchmark"])
     var = aligned_returns["benchmark"].rolling(window).var()
     beta = cov / var
@@ -1126,15 +1068,11 @@ def compute_rolling_beta(aligned_returns, window=63):
 
 
 def compute_relative_performance(aligned_returns):
-    if aligned_returns is None or aligned_returns.empty or "benchmark" not in aligned_returns.columns:
-        return pd.Series(dtype=float)
     relative = (1 + aligned_returns["portfolio"]).cumprod() / (1 + aligned_returns["benchmark"]).cumprod() - 1.0
     return relative.replace([np.inf, -np.inf], np.nan)
 
 
 def compute_rolling_information_ratio(aligned_returns, window=63):
-    if aligned_returns is None or aligned_returns.empty or "benchmark" not in aligned_returns.columns:
-        return pd.Series(dtype=float)
     active = aligned_returns["portfolio"] - aligned_returns["benchmark"]
     rolling_mean = active.rolling(window).mean() * TRADING_DAYS
     rolling_te = active.rolling(window).std() * np.sqrt(TRADING_DAYS)
@@ -1322,8 +1260,6 @@ def compute_lightweight_forecast(symbol, period="3y", lookback=30, forecast_hori
 
 # ============================
 # Technical Analysis (single instrument)
-# - Uses deterministic Yahoo Finance data only
-# - Metrics are computed on daily returns; charts on price and derived series
 # ============================
 
 def _ema(series: pd.Series, span: int):
@@ -1333,7 +1269,6 @@ def _rsi(series: pd.Series, period: int = 14):
     delta = series.diff()
     up = delta.clip(lower=0)
     down = -delta.clip(upper=0)
-    # Wilder smoothing via EMA with alpha=1/period
     roll_up = up.ewm(alpha=1/period, adjust=False).mean()
     roll_down = down.ewm(alpha=1/period, adjust=False).mean()
     rs = roll_up / roll_down.replace(0, np.nan)
@@ -1376,9 +1311,7 @@ def _download_close(symbol: str, period: str = "2y", interval: str = "1d"):
     return close
 
 def _quant_metrics(returns: pd.Series):
-    # Returns are daily simple returns (not log returns)
     if qs is None:
-        # Fallback: compute essentials without naming dependencies in messages
         rf_daily = RISK_FREE_RATE / TRADING_DAYS
         excess = returns - rf_daily
         cagr = (1 + returns).prod() ** (TRADING_DAYS / len(returns)) - 1
@@ -1402,7 +1335,6 @@ def _quant_metrics(returns: pd.Series):
             "win_rate": _safe_float((returns > 0).mean())
         }
 
-    # Primary path: metrics engine
     return {
         "cagr": _safe_float(qs.stats.cagr(returns)),
         "volatility": _safe_float(qs.stats.volatility(returns)),
@@ -1478,7 +1410,6 @@ def api_technical(payload: dict = Body(...)):
         if not symbol:
             raise RuntimeError("Symbol is required for technical analysis")
 
-        # Keep allowed periods tight
         allowed = {"6mo", "1y", "2y", "5y", "10y", "max"}
         if isinstance(period, str) and period not in allowed:
             period = "2y"
@@ -1680,14 +1611,13 @@ def api_optimization(payload: dict = Body(...)):
 
         result = {
             "strategy": ctx["strategy"],
-            "benchmark_symbol": ctx.get("benchmark_symbol"),
+            "benchmark_symbol": ctx.get("benchmark_symbol_used") if ctx.get("benchmark_available") else None,
             "risk_free_rate": RISK_FREE_RATE,
             "used_symbols": list(ctx["prices"].columns),
             "metrics": ctx["metrics"],
             "weights": ctx["weight_table"],
             "group_weights_prior": ctx.get("group_weights_prior", []),
             "group_weights_optimized": ctx.get("group_weights_optimized", []),
-
             "allocation_donut": donut,
             "frontier": ctx["frontier"],
             "feasibility_notes": ctx.get("feasibility_notes", []),
@@ -1714,17 +1644,24 @@ def api_analytics(payload: dict = Body(...)):
 
         rolling_sharpe = compute_rolling_sharpe(ctx["portfolio_returns"], window=63)
         cumulative, drawdown = compute_drawdown(ctx["portfolio_returns"])
-        rolling_beta = compute_rolling_beta(ctx["aligned"], window=63)
         regimes = compute_hmm_regimes(ctx["portfolio_returns"], n_states=3)
 
-        benchmark_cumulative = (1 + ctx["aligned"]["benchmark"]).cumprod() if ("benchmark" in ctx["aligned"].columns) else pd.Series(dtype=float)
-        portfolio_cumulative = (1 + ctx["aligned"]["portfolio"]).cumprod()
-        relative_performance = compute_relative_performance(ctx["aligned"])
-        rolling_ir = compute_rolling_information_ratio(ctx["aligned"], window=63)
+        if ctx.get("benchmark_available") and "benchmark" in ctx["aligned"].columns and not ctx["aligned"].empty:
+            rolling_beta = compute_rolling_beta(ctx["aligned"], window=63)
+            benchmark_cumulative = (1 + ctx["aligned"]["benchmark"]).cumprod()
+            relative_performance = compute_relative_performance(ctx["aligned"])
+            rolling_ir = compute_rolling_information_ratio(ctx["aligned"], window=63)
+        else:
+            rolling_beta = pd.Series(dtype=float)
+            benchmark_cumulative = pd.Series(dtype=float)
+            relative_performance = pd.Series(dtype=float)
+            rolling_ir = pd.Series(dtype=float)
+
+        portfolio_cumulative = (1 + ctx["portfolio_returns"]).cumprod()
 
         result = {
             "strategy": ctx["strategy"],
-            "benchmark_symbol": ctx.get("benchmark_symbol"),
+            "benchmark_symbol": ctx.get("benchmark_symbol_used") if ctx.get("benchmark_available") else None,
             "benchmark_summary": ctx["metrics"],
             "rolling_sharpe": series_to_records(rolling_sharpe),
             "cumulative": series_to_records(cumulative),
@@ -1735,8 +1672,8 @@ def api_analytics(payload: dict = Body(...)):
             "benchmark_cumulative": series_to_records(benchmark_cumulative) if not benchmark_cumulative.empty else [],
             "relative_performance": series_to_records(relative_performance),
             "rolling_information_ratio": series_to_records(rolling_ir),
-            "feasibility_notes": ctx.get("feasibility_notes", []),
-            "benchmark_available": ctx.get("benchmark_available", False)
+            "benchmark_available": bool(ctx.get("benchmark_available")),
+            "feasibility_notes": ctx.get("feasibility_notes", [])
         }
         return JSONResponse(content=result)
     except Exception as e:
@@ -1770,7 +1707,7 @@ def api_risk(payload: dict = Body(...)):
 
         result = {
             "strategy": ctx["strategy"],
-            "benchmark_symbol": ctx.get("benchmark_symbol"),
+            "benchmark_symbol": ctx.get("benchmark_symbol_used") if ctx.get("benchmark_available") else None,
             "custom": risk_custom,
             "risk_95": risk_95,
             "risk_99": risk_99,
@@ -1778,8 +1715,7 @@ def api_risk(payload: dict = Body(...)):
             "risk_contrib_group_breakdown": group_weight_breakdown(aligned_weights, ctx.get("group_map", {})),
             "weights_used_for_risk": [{"symbol": s, "weight": float(w)} for s, w in aligned_weights.items()],
             "correlation_heatmap": heatmap,
-            "feasibility_notes": ctx.get("feasibility_notes", []),
-            "benchmark_available": ctx.get("benchmark_available", False)
+            "feasibility_notes": ctx.get("feasibility_notes", [])
         }
         return JSONResponse(content=result)
     except Exception as e:
