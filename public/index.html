@@ -384,6 +384,7 @@
     <div class="tab-strip">
       <button class="tab-btn active" data-tab="overview-pane">Overview</button>
       <button class="tab-btn" data-tab="major-world-indices-pane">Major World Indices</button>
+      <button class="tab-btn" data-tab="asset-class-analysis-pane">Asset Class Analysis</button>
       <button class="tab-btn" data-tab="technical-pane">Technical Analysis</button>
       <button class="tab-btn" data-tab="construction-pane">Portfolio Construction</button>
       <button class="tab-btn" data-tab="analytics-pane">Analytics</button>
@@ -535,6 +536,63 @@
         </div>
         <div id="major-world-indices-status" class="status-line"></div>
       </div>
+
+
+      <div id="asset-class-analysis-pane" class="tab-pane">
+        <div class="toolbar">
+          <label for="aca-group-select">Asset Class</label>
+          <select id="aca-group-select"></select>
+          <label for="aca-period-select">Period</label>
+          <select id="aca-period-select">
+            <option value="6mo">6M</option>
+            <option value="1y">1Y</option>
+            <option value="2y" selected>2Y</option>
+            <option value="5y">5Y</option>
+            <option value="10y">10Y</option>
+            <option value="max">MAX</option>
+          </select>
+          <button id="run-asset-class-analysis-btn">Run Asset Class Analysis</button>
+        </div>
+        <div class="small-note">
+          Dedicated dashboard for a selected asset class from the investment universe. Choose an asset class from the combo box to analyze its constituent instruments with the same structure used in Major World Indices.
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-box"><div class="kpi-label">Instruments Loaded</div><div class="kpi-value" id="aca-count">0</div></div>
+          <div class="kpi-box"><div class="kpi-label">Positive Today</div><div class="kpi-value" id="aca-positive">0</div></div>
+          <div class="kpi-box"><div class="kpi-label">Average 30D Volatility</div><div class="kpi-value" id="aca-vol">—</div></div>
+          <div class="kpi-box"><div class="kpi-label">Selected Asset Class</div><div class="kpi-value" id="aca-selected" style="font-size:20px;">—</div></div>
+        </div>
+        <div class="panel-box">
+          <div class="section-title">Asset Class Overview</div>
+          <div id="asset-class-analysis-chart" class="medium-plot"></div>
+        </div>
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Asset Class Instruments Table</div>
+          <div class="table-shell" style="max-height:480px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Family</th>
+                  <th>Asset Class</th>
+                  <th>Symbol</th>
+                  <th>Instrument</th>
+                  <th>Price</th>
+                  <th>1D</th>
+                  <th>1W</th>
+                  <th>1M</th>
+                  <th>3M</th>
+                  <th>YTD</th>
+                  <th>1Y</th>
+                  <th>Vol 30D</th>
+                </tr>
+              </thead>
+              <tbody id="asset-class-analysis-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="asset-class-analysis-status" class="status-line"></div>
+      </div>
+
 
       <div id="technical-pane" class="tab-pane">
         <div class="toolbar">
@@ -1422,6 +1480,98 @@
         plot_bgcolor: "#f8f8f8"
       }, { responsive: true, displayModeBar: true });
     }
+
+
+    function populateAssetClassAnalysisSelector() {
+      const sel = document.getElementById("aca-group-select");
+      if (!sel) return;
+      const prev = sel.value || "ALL";
+      sel.innerHTML = `<option value="ALL">Select Asset Class</option>`;
+      allGroups.forEach(g => {
+        const opt = document.createElement("option");
+        opt.value = g;
+        opt.textContent = g;
+        sel.appendChild(opt);
+      });
+      if (prev !== "ALL" && allGroups.includes(prev)) {
+        sel.value = prev;
+      }
+    }
+
+    function renderAssetClassAnalysis(data) {
+      const rows = data.rows || [];
+      const tbody = document.getElementById("asset-class-analysis-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${r.family || ""}</td>
+          <td>${r.group || ""}</td>
+          <td>${r.symbol}</td>
+          <td class="left-text">${r.label}</td>
+          <td class="right-text">${fmtNumber(r.price, 2)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1d_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1w_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_3m_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ytd_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.ret_1y_pct)}</td>
+          <td class="right-text">${fmtPctRaw(r.vol_30d_pct)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById("aca-count").textContent = rows.length;
+      document.getElementById("aca-positive").textContent = rows.filter(r => Number(r.ret_1d_pct) > 0).length;
+      const volRows = rows.filter(r => r.vol_30d_pct !== null && r.vol_30d_pct !== undefined);
+      const avgVol = volRows.reduce((a,r)=>a+Number(r.vol_30d_pct||0),0) / Math.max(volRows.length,1);
+      document.getElementById("aca-vol").textContent = rows.length ? `${avgVol.toFixed(2)}%` : "—";
+      document.getElementById("aca-selected").textContent = data.selected_group && data.selected_group !== "ALL" ? data.selected_group : "—";
+
+      Plotly.newPlot("asset-class-analysis-chart", [{
+        x: rows.map(r => r.label),
+        y: rows.map(r => Number(r.ytd_pct || 0)),
+        type: "bar",
+        marker: { color: "#7a0019" },
+        hovertemplate: "%{x}<br>YTD: %{y:.2f}%<extra></extra>"
+      }], {
+        margin: { l: 50, r: 20, t: 20, b: 120 },
+        xaxis: { tickangle: -45, gridcolor: "#d8d8d8" },
+        yaxis: { title: "YTD Return (%)", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+    }
+
+    async function runAssetClassAnalysis() {
+      const btn = document.getElementById("run-asset-class-analysis-btn");
+      const status = document.getElementById("asset-class-analysis-status");
+      const group = document.getElementById("aca-group-select")?.value || "ALL";
+      const period = document.getElementById("aca-period-select")?.value || "2y";
+
+      if (group === "ALL") {
+        if (status) status.textContent = "Please select an asset class from the combo box.";
+        return;
+      }
+
+      if (btn) { btn.disabled = true; btn.textContent = "Running..."; }
+      if (status) status.textContent = `Asset Class Analysis is running for ${group}...`;
+      try {
+        const params = new URLSearchParams({ group, period });
+        const res = await fetch(`/api/asset-class-analysis?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Asset Class Analysis request failed");
+        renderAssetClassAnalysis(data);
+        if (status) status.textContent = `Asset Class Analysis complete · Loaded ${data.count || 0} instruments for ${group}.`;
+      } catch (err) {
+        if (status) status.textContent = `Asset Class Analysis error: ${err.message}`;
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Run Asset Class Analysis"; }
+      }
+    }
+
 
     async function runMajorWorldIndices() {
       const btn = document.getElementById("run-major-world-indices-btn");
@@ -2770,6 +2920,8 @@ async function runOptimization() {
     document.getElementById("run-forecast-btn").addEventListener("click", runForecast);
     document.getElementById("run-ta-btn").addEventListener("click", runTechnicalAnalysis);
     const mwiBtn = document.getElementById("run-major-world-indices-btn"); if (mwiBtn) mwiBtn.addEventListener("click", runMajorWorldIndices);
+    const acaBtn = document.getElementById("run-asset-class-analysis-btn"); if (acaBtn) acaBtn.addEventListener("click", runAssetClassAnalysis);
+    const acaSel = document.getElementById("aca-group-select"); if (acaSel) acaSel.addEventListener("change", runAssetClassAnalysis);
 
     (async function init() {
       setupTabs();
