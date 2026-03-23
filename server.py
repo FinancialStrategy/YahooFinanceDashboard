@@ -924,8 +924,8 @@ def optimize_with_strategy(prices, strategy, target_volatility, target_return, p
             if prior_weights is None:
                 raise RuntimeError("Prior weights were not supplied.")
             wvec = np.array([prior_weights[s] for s in symbols], dtype=float)
-            port_ret = float(mu.values @ wvec)
-            port_vol = float(np.sqrt(wvec.T @ cov_matrix.values @ wvec))
+            port_ret = float(np.asarray(mu.values @ wvec).squeeze())
+            port_vol = float(np.sqrt(np.asarray(wvec.T @ cov_matrix.values @ wvec).squeeze()))
             sharpe = float((port_ret - RISK_FREE_RATE) / port_vol) if port_vol > 0 else 0.0
             weights = {s: float(round(prior_weights[s], 6)) for s in symbols if prior_weights[s] > 1e-8}
             perf = (port_ret, port_vol, sharpe)
@@ -1282,11 +1282,13 @@ def compute_risk_contributions(weight_series, cov_matrix, labels):
     w = weight_series.values.reshape(-1, 1)
     sigma = cov_aligned.values
 
-    portfolio_var = float(w.T @ sigma @ w)
-    if portfolio_var <= 0:
+    # Numpy may return a 1x1 array here; convert safely to a Python scalar.
+    portfolio_var_arr = w.T @ sigma @ w
+    portfolio_var = float(np.asarray(portfolio_var_arr).squeeze())
+    if not np.isfinite(portfolio_var) or portfolio_var <= 0:
         return []
 
-    portfolio_vol = np.sqrt(portfolio_var)
+    portfolio_vol = float(np.sqrt(portfolio_var))
     marginal_contrib = (sigma @ w) / portfolio_vol
     component_contrib = w * marginal_contrib
     pct_contrib = component_contrib / portfolio_vol
@@ -1296,10 +1298,10 @@ def compute_risk_contributions(weight_series, cov_matrix, labels):
         rows.append({
             "symbol": sym,
             "label": labels.get(sym, sym),
-            "weight": float(w[i, 0]),
-            "marginal_risk_contribution": float(marginal_contrib[i, 0]),
-            "component_risk_contribution": float(component_contrib[i, 0]),
-            "percent_risk_contribution": float(pct_contrib[i, 0])
+            "weight": float(np.asarray(w[i, 0]).squeeze()),
+            "marginal_risk_contribution": float(np.asarray(marginal_contrib[i, 0]).squeeze()),
+            "component_risk_contribution": float(np.asarray(component_contrib[i, 0]).squeeze()),
+            "percent_risk_contribution": float(np.asarray(pct_contrib[i, 0]).squeeze())
         })
 
     return sorted(rows, key=lambda x: x["percent_risk_contribution"], reverse=True)
