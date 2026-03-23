@@ -452,6 +452,8 @@ def build_market_snapshot(items, period="2y"):
 
 
 
+
+
 def build_asset_class_snapshot(group_filter="ALL", family_filter="ALL", period="2y"):
     universe = load_universe()
     items = flatten_universe(universe)
@@ -465,11 +467,108 @@ def build_asset_class_snapshot(group_filter="ALL", family_filter="ALL", period="
     if not selected:
         raise RuntimeError("No instruments matched the selected asset class.")
 
-    snapshot = build_market_snapshot(selected, period=period)
-    snapshot["selected_group"] = group_filter
-    snapshot["selected_family"] = family_filter
-    snapshot["selected_count"] = len(selected)
-    return snapshot
+    symbols = [x["symbol"] for x in selected]
+    labels = {x["symbol"]: x.get("label", x["symbol"]) for x in selected}
+
+    df = yf.download(
+        tickers=symbols,
+        period=period,
+        interval="1d",
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+        group_by="ticker"
+    )
+    if df.empty:
+        raise RuntimeError("Yahoo Finance returned empty dataset for Asset Class Analysis")
+
+    price_frames = []
+    rows = []
+    total_symbols = len(symbols)
+
+    for item in selected:
+        symbol = item["symbol"]
+        try:
+            sdf = extract_symbol_frame(df, symbol, total_symbols).copy().dropna(how="all")
+            close_col = "Close" if "Close" in sdf.columns else ("Adj Close" if "Adj Close" in sdf.columns else None)
+            if sdf.empty or not close_col:
+                continue
+            close = pd.to_numeric(sdf[close_col], errors="coerce").dropna().sort_index()
+            if len(close) < 2:
+                continue
+
+            price_frames.append(close.rename(symbol))
+
+            last_price = float(close.iloc[-1])
+            prev_close = float(close.iloc[-2])
+            rows.append({
+                "family": item.get("family", "Other"),
+                "group": item.get("group", "Unknown"),
+                "symbol": symbol,
+                "label": item.get("label", symbol),
+                "price": last_price,
+                "ret_1d_pct": ((last_price / prev_close) - 1.0) * 100.0 if prev_close != 0 else None,
+                "ret_1w_pct": safe_pct_return(close, 5),
+                "ret_1m_pct": safe_pct_return(close, 21),
+                "ret_3m_pct": safe_pct_return(close, 63),
+                "ytd_pct": ytd_return(close),
+                "ret_1y_pct": safe_pct_return(close, 252),
+                "vol_30d_pct": annualized_volatility(close, 30),
+            })
+        except Exception:
+            continue
+
+    eq_curve = []
+    relative_table = []
+    best_worst = {"best": None, "worst": None}
+
+    if price_frames:
+        panel = pd.concat(price_frames, axis=1).sort_index().ffill().dropna(how="all")
+        if not panel.empty:
+            first_valid = [panel[c].first_valid_index() for c in panel.columns if panel[c].first_valid_index() is not None]
+            if first_valid:
+                common_start = max(first_valid)
+                panel = panel.loc[common_start:].ffill().dropna(axis=0, how="any")
+
+        if not panel.empty and panel.shape[1] >= 1 and len(panel) >= 2:
+            norm_panel = panel / panel.iloc[0] * 100.0
+            eq_series = norm_panel.mean(axis=1)
+            eq_curve = [{"date": pd.to_datetime(i).strftime("%Y-%m-%d"), "value": float(v)} for i, v in eq_series.items()]
+
+            last_vals = norm_panel.iloc[-1].sort_values(ascending=False)
+            relative_table = []
+            for sym, val in last_vals.items():
+                row_meta = next((r for r in rows if r["symbol"] == sym), None)
+                relative_table.append({
+                    "symbol": sym,
+                    "label": labels.get(sym, sym),
+                    "relative_strength_indexed": float(val),
+                    "family": row_meta.get("family", "Other") if row_meta else "Other",
+                    "group": row_meta.get("group", "Unknown") if row_meta else "Unknown",
+                    "ytd_pct": row_meta.get("ytd_pct") if row_meta else None,
+                    "ret_1y_pct": row_meta.get("ret_1y_pct") if row_meta else None,
+                    "vol_30d_pct": row_meta.get("vol_30d_pct") if row_meta else None,
+                })
+
+            if relative_table:
+                best_worst["best"] = relative_table[0]
+                best_worst["worst"] = relative_table[-1]
+
+    rows = sorted(rows, key=lambda x: (x["ytd_pct"] if x["ytd_pct"] is not None else -999), reverse=True)
+
+    return {
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "selected_group": group_filter,
+        "selected_family": family_filter,
+        "selected_count": len(selected),
+        "count": len(rows),
+        "rows": rows,
+        "equal_weight_cumulative": eq_curve,
+        "relative_ranking": relative_table,
+        "leaders_laggards": best_worst
+    }
+
+
 
 def clean_weight_dict(weights: dict):
     out = {}
