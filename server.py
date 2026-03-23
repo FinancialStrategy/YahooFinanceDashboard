@@ -450,6 +450,27 @@ def build_market_snapshot(items, period="2y"):
         "rows": result_rows
     }
 
+
+
+def build_asset_class_snapshot(group_filter="ALL", family_filter="ALL", period="2y"):
+    universe = load_universe()
+    items = flatten_universe(universe)
+
+    selected = items
+    if family_filter and family_filter != "ALL":
+        selected = [x for x in selected if x.get("family", "Other") == family_filter]
+    if group_filter and group_filter != "ALL":
+        selected = [x for x in selected if x.get("group") == group_filter]
+
+    if not selected:
+        raise RuntimeError("No instruments matched the selected asset class.")
+
+    snapshot = build_market_snapshot(selected, period=period)
+    snapshot["selected_group"] = group_filter
+    snapshot["selected_family"] = family_filter
+    snapshot["selected_count"] = len(selected)
+    return snapshot
+
 def clean_weight_dict(weights: dict):
     out = {}
     for k, v in weights.items():
@@ -1585,6 +1606,17 @@ def api_snapshot(force: bool = False):
             return JSONResponse(content=stale)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+
+@app.get("/api/asset-class-analysis")
+def api_asset_class_analysis(group: str = "ALL", family: str = "ALL", period: str = "2y"):
+    try:
+        if period not in {"6mo", "1y", "2y", "5y", "10y", "max"}:
+            period = "2y"
+        return JSONResponse(content=build_asset_class_snapshot(group_filter=group, family_filter=family, period=period))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/major-world-indices")
 def api_major_world_indices():
