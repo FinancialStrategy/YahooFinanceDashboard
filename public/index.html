@@ -2618,20 +2618,49 @@ async function runOptimization() {
     }
 
     function renderRiskContributionBar(rows) {
-      const ordered = [...(rows || [])].slice(0, 20).reverse();
+      const ordered = [...(rows || [])].slice(0, 20);
+
+      const wrappedLabels = ordered.map(r => {
+        const base = r.symbol || "";
+        const label = (r.label || "").trim();
+        if (!label || label === base) return base;
+        const words = label.split(/\s+/);
+        const wrapped = [];
+        let line = "";
+        words.forEach(w => {
+          const candidate = line ? `${line} ${w}` : w;
+          if (candidate.length <= 12) {
+            line = candidate;
+          } else {
+            if (line) wrapped.push(line);
+            line = w;
+          }
+        });
+        if (line) wrapped.push(line);
+        return `${base}<br>${wrapped.slice(0, 2).join("<br>")}`;
+      });
 
       Plotly.newPlot("risk-contrib-bar-chart", [{
-        x: ordered.map(r => r.percent_risk_contribution * 100),
-        y: ordered.map(r => (r.label ? `${r.label} (${r.symbol})` : r.symbol)),
+        x: wrappedLabels,
+        y: ordered.map(r => r.percent_risk_contribution * 100),
         type: "bar",
-        orientation: "h",
         marker: { color: "#7a0019" },
         text: ordered.map(r => `${(r.percent_risk_contribution * 100).toFixed(2)}%`),
         textposition: "outside",
-        hovertemplate: "%{y}<br>% Risk Contribution: %{x:.2f}%<extra></extra>"
+        cliponaxis: false,
+        hovertemplate: "%{x}<br>% Risk Contribution: %{y:.2f}%<extra></extra>"
       }], {
-        margin: { l: 100, r: 25, t: 20, b: 50 },
-        xaxis: { title: "% Risk Contribution", gridcolor: "#d8d8d8" },
+        margin: { l: 60, r: 20, t: 20, b: 120 },
+        xaxis: {
+          title: "",
+          tickangle: 0,
+          automargin: true,
+          gridcolor: "#d8d8d8"
+        },
+        yaxis: {
+          title: "% Risk Contribution",
+          gridcolor: "#d8d8d8"
+        },
         paper_bgcolor: "#f8f8f8",
         plot_bgcolor: "#f8f8f8"
       }, { responsive: true, displayModeBar: true });
