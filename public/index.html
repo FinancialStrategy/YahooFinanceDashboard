@@ -566,7 +566,46 @@
           <div class="section-title">Asset Class Overview</div>
           <div id="asset-class-analysis-chart" class="medium-plot"></div>
         </div>
+        
         <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Equal-Weight Cumulative Performance</div>
+          <div class="small-note">Indexed to 100 at the common aligned start date across all instruments in the selected asset class.</div>
+          <div id="asset-class-cumulative-chart" class="medium-plot"></div>
+        </div>
+
+        <div class="kpi-grid" style="margin-top:16px;">
+          <div class="panel-box">
+            <div class="section-title">Best Performer</div>
+            <div id="aca-best-card" class="small-note">—</div>
+          </div>
+          <div class="panel-box">
+            <div class="section-title">Worst Performer</div>
+            <div id="aca-worst-card" class="small-note">—</div>
+          </div>
+        </div>
+
+        <div class="section-block" style="margin-top:16px;">
+          <div class="section-title">Relative Strength Ranking</div>
+          <div class="small-note">Ranking based on indexed equal-length cumulative performance for the selected asset class universe.</div>
+          <div class="table-shell" style="max-height:320px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Symbol</th>
+                  <th>Instrument</th>
+                  <th>Indexed Level</th>
+                  <th>YTD</th>
+                  <th>1Y</th>
+                  <th>Vol 30D</th>
+                </tr>
+              </thead>
+              <tbody id="asset-class-ranking-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+<div class="section-block" style="margin-top:16px;">
           <div class="section-title">Asset Class Instruments Table</div>
           <div class="table-shell" style="max-height:480px;">
             <table>
@@ -1482,27 +1521,42 @@
     }
 
 
+    
     function populateAssetClassAnalysisSelector() {
       const sel = document.getElementById("aca-group-select");
       if (!sel) return;
       const prev = sel.value || "ALL";
+
+      let groups = Array.isArray(allGroups) ? allGroups.slice() : [];
+      if (!groups.length && Array.isArray(allRows)) {
+        groups = [...new Set(allRows.map(r => r.group).filter(Boolean))];
+      }
+      groups = [...new Set(groups)].sort();
+
       sel.innerHTML = `<option value="ALL">Select Asset Class</option>`;
-      allGroups.forEach(g => {
+      groups.forEach(g => {
         const opt = document.createElement("option");
         opt.value = g;
-        opt.textContent = g;
+        const fam = Array.isArray(allRows) ? (allRows.find(r => r.group === g)?.family || "") : "";
+        opt.textContent = fam ? `${g} (${fam})` : g;
         sel.appendChild(opt);
       });
-      if (prev !== "ALL" && allGroups.includes(prev)) {
+
+      if (prev !== "ALL" && groups.includes(prev)) {
         sel.value = prev;
+      } else {
+        sel.value = "ALL";
       }
     }
 
+    
     function renderAssetClassAnalysis(data) {
       const rows = data.rows || [];
       const tbody = document.getElementById("asset-class-analysis-body");
+      const rankBody = document.getElementById("asset-class-ranking-body");
       if (!tbody) return;
       tbody.innerHTML = "";
+      if (rankBody) rankBody.innerHTML = "";
 
       rows.forEach(r => {
         const tr = document.createElement("tr");
@@ -1543,6 +1597,60 @@
         paper_bgcolor: "#f8f8f8",
         plot_bgcolor: "#f8f8f8"
       }, { responsive: true, displayModeBar: true });
+
+      const eq = data.equal_weight_cumulative || [];
+      Plotly.newPlot("asset-class-cumulative-chart", [{
+        x: eq.map(p => p.date),
+        y: eq.map(p => Number(p.value)),
+        type: "scatter",
+        mode: "lines",
+        line: { color: "#1d4ed8", width: 2 },
+        hovertemplate: "%{x}<br>Indexed Level: %{y:.2f}<extra></extra>"
+      }], {
+        margin: { l: 50, r: 20, t: 20, b: 50 },
+        xaxis: { gridcolor: "#d8d8d8" },
+        yaxis: { title: "Indexed Level", gridcolor: "#d8d8d8" },
+        paper_bgcolor: "#f8f8f8",
+        plot_bgcolor: "#f8f8f8"
+      }, { responsive: true, displayModeBar: true });
+
+      const best = data.leaders_laggards?.best;
+      const worst = data.leaders_laggards?.worst;
+      const bestCard = document.getElementById("aca-best-card");
+      const worstCard = document.getElementById("aca-worst-card");
+      if (bestCard) {
+        bestCard.innerHTML = best ? `
+          <div><strong>${best.label}</strong> (${best.symbol})</div>
+          <div>Indexed Level: ${fmtNumber(best.relative_strength_indexed, 2)}</div>
+          <div>YTD: ${fmtPctRaw(best.ytd_pct)} | 1Y: ${fmtPctRaw(best.ret_1y_pct)}</div>
+          <div>30D Vol: ${fmtPctRaw(best.vol_30d_pct)}</div>
+        ` : "—";
+      }
+      if (worstCard) {
+        worstCard.innerHTML = worst ? `
+          <div><strong>${worst.label}</strong> (${worst.symbol})</div>
+          <div>Indexed Level: ${fmtNumber(worst.relative_strength_indexed, 2)}</div>
+          <div>YTD: ${fmtPctRaw(worst.ytd_pct)} | 1Y: ${fmtPctRaw(worst.ret_1y_pct)}</div>
+          <div>30D Vol: ${fmtPctRaw(worst.vol_30d_pct)}</div>
+        ` : "—";
+      }
+
+      const ranking = data.relative_ranking || [];
+      if (rankBody) {
+        ranking.forEach((r, idx) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${idx + 1}</td>
+            <td>${r.symbol}</td>
+            <td class="left-text">${r.label}</td>
+            <td class="right-text">${fmtNumber(r.relative_strength_indexed, 2)}</td>
+            <td class="right-text">${fmtPctRaw(r.ytd_pct)}</td>
+            <td class="right-text">${fmtPctRaw(r.ret_1y_pct)}</td>
+            <td class="right-text">${fmtPctRaw(r.vol_30d_pct)}</td>
+          `;
+          rankBody.appendChild(tr);
+        });
+      }
     }
 
     async function runAssetClassAnalysis() {
@@ -1552,14 +1660,15 @@
       const period = document.getElementById("aca-period-select")?.value || "2y";
 
       if (group === "ALL") {
-        if (status) status.textContent = "Please select an asset class from the combo box.";
+        if (status) status.textContent = "Please select an asset class from the combo box. If the combo is empty, reload the snapshot first.";
         return;
       }
 
       if (btn) { btn.disabled = true; btn.textContent = "Running..."; }
       if (status) status.textContent = `Asset Class Analysis is running for ${group}...`;
       try {
-        const params = new URLSearchParams({ group, period });
+        const family = document.getElementById("family-filter")?.value || "ALL";
+        const params = new URLSearchParams({ group, family, period });
         const res = await fetch(`/api/asset-class-analysis?${params.toString()}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "Asset Class Analysis request failed");
@@ -1621,6 +1730,7 @@
 
   allGroups = [...new Set(allGroups)].sort();
   allFamilies = [...new Set(allFamilies)].sort();
+  populateAssetClassAnalysisSelector();
   Object.keys(groupsByFamily).forEach(k => {
     groupsByFamily[k] = [...new Set(groupsByFamily[k])].sort();
   });
@@ -2928,6 +3038,7 @@ async function runOptimization() {
       attachClassTargetButtons();
       await loadUniverse();
       await loadSnapshot(false);
+      populateAssetClassAnalysisSelector();
       await runMajorWorldIndices();
     })();
   </script>
